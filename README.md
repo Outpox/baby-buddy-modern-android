@@ -8,14 +8,24 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/01-today-dashboard.png" alt="Today dashboard" width="250"></td>
-    <td><img src="docs/screenshots/02-quick-log.png" alt="Log screen" width="250"></td>
-    <td><img src="docs/screenshots/03-trends.png" alt="Trends" width="250"></td>
+    <td align="center"><b>Today Dashboard (Day)</b></td>
+    <td align="center"><b>Today Dashboard (Night)</b></td>
+    <td align="center"><b>Quick Log</b></td>
   </tr>
   <tr>
+    <td><img src="docs/screenshots/01-today-dashboard.png" alt="Today dashboard (Day)" width="250"></td>
+    <td><img src="docs/screenshots/06-today-dashboard-night.png" alt="Today dashboard (Night)" width="250"></td>
+    <td><img src="docs/screenshots/02-quick-log.png" alt="Log screen" width="250"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>24h Trends</b></td>
+    <td align="center"><b>History Timeline</b></td>
+    <td align="center"><b>Settings</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/03-trends.png" alt="Trends" width="250"></td>
     <td><img src="docs/screenshots/04-history.png" alt="History" width="250"></td>
-    <td><img src="docs/screenshots/05-settings.png" alt="Connect to a server" width="250"></td>
-    <td></td>
+    <td><img src="docs/screenshots/05-settings.png" alt="Settings" width="250"></td>
   </tr>
 </table>
 
@@ -37,22 +47,40 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
 - **Night mode** — automatic dim warm palette (by time of day or system setting).
 - **12/24-hour clock**, scroll-wheel or typed time entry, per-phone tracked-item hiding, configurable quick actions.
 
-### Home-Screen Widgets
+### Home-screen widgets
 
-The app includes three native Android home-screen widgets built with Jetpack Glance that update in real time directly from app state:
-- **Quick Log Widget** (`BabyBuddyQuickLogWidget`): Provides 1-tap logging buttons for Feeding, Diaper, Pumping, and Tummy time directly on your phone's home screen.
-- **Timer Widget** (`BabyBuddyTimerWidget`): Shows active nursing or sleep timer status with a live clock, active side indicator, and Left / Right / Pause / End controls.
-- **Daily Summary Widget** (`BabyBuddySummaryWidget`): At-a-glance summary showing today's totals (feed count, nursing duration, diaper counts, sleep time, and pumped volume).
+<img src="docs/screenshots/07-widgets.png" alt="Quick log, nursing timer and today summary widgets on an Android home screen" width="360" align="right">
 
-### Lock-Screen Controls & Reminders
+Three home-screen widgets that update straight from the app's state, even when the app is closed:
 
-- **Live Nursing Controls**: An ongoing notification displaying active feeding duration, Left/Right side split, and controls to switch sides or end the feed straight from your lock screen.
-- **Live Sleep Controls**: An ongoing notification displaying running sleep duration with a 1-tap End Sleep button.
-- **Smart Reminders**:
-  - **Feed Due Alarm**: Reminds you when a configurable time (e.g., 3 hours) has elapsed since the last feed started.
-  - **Awake For Alarm**: Alerts when the baby has been awake for a set threshold to prevent overtiredness.
-  - **Asleep For Alarm**: Notifies when a timed sleep session reaches a set duration limit.
-  - *Multi-device awareness*: Reminders verify against the Baby Buddy server before alerting, so if another caregiver logs a feed on another phone, false alarms are automatically suppressed.
+- **Quick log** — one-tap Feed, Diaper and Tummy time buttons, with the baby's name, age and when they were last fed.
+- **Nursing timer** — the running feed's live clock, current side and start time, with Switch side and Pause/Resume buttons.
+- **Today summary** — today's feed count and wet/dirty diapers; tap to open the app.
+
+Add them from the launcher's widget list or from **Customize Today → Phone Home Screen** in the app.
+
+<br clear="right">
+
+### Lock-screen controls
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/08-feed-notification.png" alt="Feeding notification with Left, Pause right and End buttons" width="400"></td>
+    <td><img src="docs/screenshots/09-sleep-notification.png" alt="Sleeping notification with a Woke up button" width="400"></td>
+  </tr>
+</table>
+
+- **Feeding** — while a feed runs: the active side, each side's time and the start time, with Left / Right (pause or switch) and End buttons, usable from the lock screen.
+- **Sleeping** — while a sleep is timed: when the baby fell asleep and a **Woke up** button that saves the sleep.
+
+Both can be turned off in Settings → Notifications.
+
+### Reminders
+
+- **Feed Due Alarm**: Reminds you when a configurable time (e.g., 3 hours) has elapsed since the last feed started.
+- **Awake For Alarm**: Alerts when the baby has been awake for a set threshold to prevent overtiredness.
+- **Asleep For Alarm**: Notifies when a timed sleep session reaches a set duration limit.
+- *Multi-device awareness*: Reminders verify against the Baby Buddy server before alerting, so if another caregiver logs a feed on another phone, false alarms are automatically suppressed.
 
 ## Requirements
 

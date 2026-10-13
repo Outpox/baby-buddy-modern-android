@@ -250,7 +250,7 @@ class MainViewModel(
         if (refreshJob?.isActive == true) return
         refreshJob = viewModelScope.launch {
             _isRefreshing.value = true
-            if (repository.refresh()) {
+            if (repository.refresh() || repository.connectionConfig.value.isDemoMode) {
                 repository.loadFeedIntervals().onSuccess { _feedIntervals.value = it }
             }
             _isRefreshing.value = false

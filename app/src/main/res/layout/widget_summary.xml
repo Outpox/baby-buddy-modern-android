@@ -61,7 +61,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:text="6"
+                android:text="–"
                 android:textColor="@color/bb_on_surface"
                 android:textSize="16sp"
                 android:textStyle="bold" />
@@ -88,7 +88,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:text="5 wet · 2 dirty"
+                android:text="–"
                 android:textColor="@color/bb_on_surface"
                 android:textSize="16sp"
                 android:textStyle="bold" />

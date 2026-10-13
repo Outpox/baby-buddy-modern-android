@@ -331,6 +331,7 @@ class BabyBuddyRepository {
         prefs?.edit()?.putString(PREF_CAREGIVER, "Sarah")?.apply()
 
         _isServerDisconnectedView.value = false
+        setThemeMode(ThemeMode.LIGHT)
         _connectionConfig.value = ServerConnectionConfig(
             serverUrl = "demo.babybuddy.local",
             apiToken = "demo-token",
@@ -352,7 +353,7 @@ class BabyBuddyRepository {
         val today = startOfTodayMillis()
         val cal = Calendar.getInstance()
 
-        fun timeMs(daysAgo: Int, hour: Int, minute: Int): Long {
+        fun clockMs(daysAgo: Int, hour: Int, minute: Int): Long {
             cal.timeInMillis = today
             cal.add(Calendar.DAY_OF_YEAR, -daysAgo)
             cal.set(Calendar.HOUR_OF_DAY, hour)
@@ -361,6 +362,11 @@ class BabyBuddyRepository {
             cal.set(Calendar.MILLISECOND, 0)
             return cal.timeInMillis
         }
+
+        // The sample day is written as if it's now 19:00; shift it so its last entries are always
+        // just before now (whatever the real time), so "last feed", "next feed" and "awake for" read naturally
+        val shift = System.currentTimeMillis() - clockMs(0, 19, 0)
+        fun timeMs(daysAgo: Int, hour: Int, minute: Int): Long = clockMs(daysAgo, hour, minute) + shift
 
         val demoFeedings = mutableListOf<FeedingEvent>()
         val demoDiapers = mutableListOf<DiaperEvent>()
@@ -456,6 +462,10 @@ class BabyBuddyRepository {
         _lastSleepEndRemote.value = _sleeps.value.firstOrNull()?.timeMillis
         _lastBathRemote.value = _notes.value.firstOrNull { BATH_TAG in it.tags }?.timeMillis
         _stashBase.value = StashBase(450, System.currentTimeMillis(), 0, 0)
+        _temperatures.value = listOf(
+            TemperatureEvent(id = idCounter++, temperature = 36.8, timeMillis = timeMs(0, 9, 30), timeFormatted = formatClock(timeMs(0, 9, 30)), caregiver = "Sarah")
+        )
+        _dashboardWidgets.update { list -> list.map { it.copy(isEnabled = true) } }
     }
 
     suspend fun testConnection(
@@ -2740,6 +2750,12 @@ class BabyBuddyRepository {
 
     /** Average time between feed starts per day for the last 7 days, plus this week vs the week before. */
     suspend fun loadFeedIntervals(): Result<FeedIntervalStats> = withContext(Dispatchers.IO) {
+        if (_connectionConfig.value.isDemoMode) {
+            // Sample numbers to match the demo day (a feed about every 3 hours)
+            return@withContext Result.success(
+                FeedIntervalStats(listOf(185, 178, 192, 181, 175, 188, 180), thisWeekAverageMinutes = 183, lastWeekAverageMinutes = 171)
+            )
+        }
         val api = remoteApi
         val child = remoteChildId
         if (api == null || child == null) return@withContext Result.failure(IllegalStateException("Not connected"))

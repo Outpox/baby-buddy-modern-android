@@ -21,7 +21,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Baby Leo • 3m 12d"
+            android:text="Baby Buddy"
             android:textColor="@color/bb_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -30,7 +30,7 @@
             android:id="@+id/tv_quick_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Last fed 45m ago"
+            android:text=""
             android:textColor="@color/bb_on_surface_variant"
             android:textSize="12sp" />
     </LinearLayout>
@@ -51,22 +51,22 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:orientation="vertical"
+            android:orientation="horizontal"
             android:padding="8dp">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
                 android:contentDescription="Feed"
                 android:src="@drawable/ic_widget_feed" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginStart="6dp"
                 android:text="Feed"
                 android:textColor="@color/bb_primary"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -80,22 +80,22 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:orientation="vertical"
+            android:orientation="horizontal"
             android:padding="8dp">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
                 android:contentDescription="Diaper"
                 android:src="@drawable/ic_widget_diaper" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginStart="6dp"
                 android:text="Diaper"
                 android:textColor="@color/bb_diaper"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -108,22 +108,22 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:orientation="vertical"
+            android:orientation="horizontal"
             android:padding="8dp">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
                 android:contentDescription="Tummy Time"
                 android:src="@drawable/ic_widget_tummy" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginStart="6dp"
                 android:text="Tummy"
                 android:textColor="@color/bb_primary_container"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
