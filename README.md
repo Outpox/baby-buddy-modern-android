@@ -86,7 +86,7 @@ Both can be turned off in Settings → Notifications.
 
 - **A running [Baby Buddy](https://github.com/babybuddy/babybuddy) server** — this is a hard requirement, not optional. This app is a pure client; the server stores every feeding, sleep, diaper change, etc. and exposes them over its REST API. Install it from [github.com/babybuddy/babybuddy](https://github.com/babybuddy/babybuddy) (Docker or bare metal) before using this app.
 - Android 7.0+ (minSdk 24).
-- To build: [Android Studio](https://developer.android.com/studio) (latest, AGP 9.x / compileSdk 36), or JDK 17+ (21 recommended) with the Gradle wrapper.
+- To build: [Android Studio](https://developer.android.com/studio) (latest, AGP 9.4 / compileSdk 37), or JDK 17+ (21 recommended) with the Gradle wrapper.
 
 ## Getting started
 

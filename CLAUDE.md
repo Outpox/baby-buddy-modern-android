@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & test
 
-The Gradle wrapper (Gradle 9.3.1) is checked in:
+The Gradle wrapper (Gradle 9.6.0; AGP 9.4, Kotlin 2.4, compileSdk 37, targetSdk 36) is checked in:
 
 ```bash
 ./gradlew :app:assembleDebug                 # build debug APK
@@ -29,7 +29,7 @@ Build notes:
 - Secrets come from `.env` via the Secrets Gradle Plugin (`.env.example` is the default). `GEMINI_API_KEY` is only packaged into `BuildConfig` if uncommented in `.env`.
 - No Firebase or other Google services (removed: they were unused). Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for Gradle and Actions; bump pre-commit hooks with `pre-commit autoupdate`.
 - Dependency versions live in `gradle/libs.versions.toml`. Unused deps are deliberately left commented out in `app/build.gradle.kts` rather than removed.
-- Robolectric tests run with `@Config(sdk = [36])`.
+- Robolectric tests run with `@Config(sdk = [36])`. Robolectric 4.17 needs the `--add-exports`/`--add-opens` JVM flags set in `testOptions` (`app/build.gradle.kts`).
 
 ## Architecture
 

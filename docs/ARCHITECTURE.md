@@ -98,7 +98,7 @@ Trends (`TrendsScreen.kt`) has feeding, sleep and diaper rhythm charts (one row 
 
 ## Build notes
 
-- The Gradle wrapper (Gradle 9.3.1) is checked in. Build with JDK 17+ (CI uses 21).
+- The Gradle wrapper (Gradle 9.6.0; AGP 9.4, Kotlin 2.4, compileSdk 37, targetSdk 36) is checked in. Build with JDK 17+ (CI uses 21).
 - Releases: `.github/workflows/release.yml` builds a signed release APK for a `vX.Y.Z` tag (version name from the tag, version code `X*10000+Y*100+Z`) and attaches it to a GitHub release. `checks.yml` runs the pre-commit hooks (`.pre-commit-config.yaml`: hygiene, gitleaks, actionlint, ktlint, blocks on secrets/APKs/data exports) on every push; Dependabot (`dependabot.yml`) opens weekly update PRs.
 - The debug build type signs with `${rootDir}/debug.keystore` when present (gitignored). Per the AI Studio README, remove `signingConfig = signingConfigs.getByName("debugConfig")` locally if the build fails on signing — but don't commit that change.
 - Secrets come from `.env` via the Secrets Gradle Plugin (`.env.example` is the default). `GEMINI_API_KEY` is only packaged into `BuildConfig` if uncommented in `.env`; app code does not use it yet.
