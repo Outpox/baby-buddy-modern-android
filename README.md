@@ -62,11 +62,15 @@ The app includes three native Android home-screen widgets built with Jetpack Gla
 
 ## Getting started
 
+### Install
+
+Download the APK from the [latest release](https://github.com/liorbass/baby-buddy-modern-android/releases/latest) and open it on your phone (allow installing apps from your browser when Android asks). New releases install over the old one.
+
 ### Build
 
 ```bash
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
+git clone https://github.com/liorbass/baby-buddy-modern-android.git
+cd baby-buddy-modern-android
 ./gradlew assembleDebug        # APK at app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -74,8 +78,7 @@ or open the project in Android Studio and run the `app` configuration.
 
 Notes:
 
-- **Signing:** the debug build signs with a `debug.keystore` in the repo root if present (gitignored); otherwise the standard Gradle debug signing is used. The `release` build signs with an upload key (alias `upload`) from the environment: `KEYSTORE_PATH` (default `my-upload-key.jks` in the repo root), `STORE_PASSWORD`, `KEY_PASSWORD`. Signed releases are normally built by GitHub Actions (see [Releases](#releases)).
-- **Version:** local builds are `1.0` (code 1); release builds take it from the tag (`-PversionName=1.2.0 -PversionCode=10200`).
+- **Signing:** debug builds use the standard Gradle debug key (or a gitignored `debug.keystore` in the repo root, if present). An APK you build yourself can't update one installed from the releases (different signing key), and vice versa.
 - **`.env`:** the project uses the Secrets Gradle Plugin with `.env` (see `.env.example`). The only key, `GEMINI_API_KEY`, is optional and currently unused by app code — you can skip creating `.env` entirely.
 
 ### Contributing setup
@@ -89,21 +92,6 @@ cp tools/hooks/blocklist.example tools/hooks/blocklist.local   # names/addresses
 ```
 
 `pre-commit run --all-files` checks everything; `pre-commit autoupdate` bumps hook versions. The same checks run in CI (`.github/workflows/checks.yml`).
-
-### Releases
-
-Push a tag like `v1.2.0` (or run **Actions → Release APK** with a version) to build a signed APK and attach it to a GitHub release. Versions are `MAJOR.MINOR.PATCH` (minor and patch below 100); the Android version code is `MAJOR*10000 + MINOR*100 + PATCH`, so each release installs over the last.
-
-One-time setup: create an upload key and add it as repository secrets (**Settings → Secrets and variables → Actions**):
-
-```bash
-keytool -genkeypair -v -keystore upload.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000
-base64 -w0 upload.jks   # → secret KEYSTORE_BASE64; also add STORE_PASSWORD and KEY_PASSWORD
-```
-
-Keep the keystore and passwords safe: APKs signed with a different key can't update an installed app.
-
-To install releases on a phone that has an Android Studio build, uninstall that first (different signing key).
 
 ### Connect to your server
 

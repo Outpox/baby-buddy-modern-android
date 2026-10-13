@@ -47,9 +47,11 @@ jobs:
             exit 1
           fi
           code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
-          echo "name=$v" >> "$GITHUB_OUTPUT"
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          {
+            echo "name=$v"
+            echo "code=$code"
+            echo "tag=v$v"
+          } >> "$GITHUB_OUTPUT"
           echo "Version $v (code $code)"
 
       - name: Stop if this version is already released
