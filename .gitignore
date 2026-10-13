@@ -28,6 +28,8 @@ google-services.json
 keystore.properties
 signing.properties
 *.jks
+my-upload-key.passwords.txt
+*.passwords.txt
 *.keystore
 *.p12
 *.pem

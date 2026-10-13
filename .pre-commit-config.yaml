@@ -53,7 +53,7 @@ repos:
         name: no keystores, .env or local config
         language: fail
         entry: "These hold secrets or machine-specific config and must not be committed:"
-        files: (^|/)(\.env(\..*)?|local\.properties|google-services\.json|keystore\.properties|signing\.properties|.*\.(jks|keystore|p12|pem|key))$
+        files: (^|/)(\.env(\..*)?|local\.properties|google-services\.json|keystore\.properties|signing\.properties|.*\.passwords\.txt|.*\.(jks|keystore|p12|pem|key))$
         exclude: (^|/)\.env\.example$
       - id: forbid-build-output
         name: no APKs or bundles (releases come from GitHub Actions)
