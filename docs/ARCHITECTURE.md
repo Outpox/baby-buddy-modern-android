@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes how the app is structured. Package root is `com.example` (applicationId `com.aistudio.babybuddy.nvzpkq`). The external interfaces (Baby Buddy REST API, auth, sync semantics) are defined in [ICD.md](ICD.md).
+This document describes how the app is structured. Package root is `com.example` (applicationId `dev.liorbass.babybuddy`; app name "Baby Buddy Companion"). The external interfaces (Baby Buddy REST API, auth, sync semantics) are defined in [ICD.md](ICD.md).
 
 ## State flow
 
@@ -18,7 +18,7 @@ Navigation is not Navigation-Compose: it's a `ScreenDestination` enum in `MainVi
 - the running nursing timer and sleep timer (same prefs);
 - in `filesDir/offline/` (`OfflineStore`, Moshi JSON): the unsent-write queue and a cache of today's entries.
 
-These are excluded from backups. Without a saved login the app shows only the login screen (`needsLogin` in `BabyBuddyApp`). Room is a dependency but unused.
+These are excluded from backups. Without a saved login the app shows only the login screen (`needsLogin` in `BabyBuddyApp`).
 
 ## Server integration
 
@@ -101,6 +101,5 @@ Trends (`TrendsScreen.kt`) has feeding, sleep and diaper rhythm charts (one row 
 - The Gradle wrapper (Gradle 9.6.0; AGP 9.4, Kotlin 2.4, compileSdk 37, targetSdk 36) is checked in. Build with JDK 17+ (CI uses 21).
 - Releases: `.github/workflows/release.yml` builds a signed release APK for a `vX.Y.Z` tag (version name from the tag, version code `X*10000+Y*100+Z`) and attaches it to a GitHub release. `checks.yml` runs the pre-commit hooks (`.pre-commit-config.yaml`: hygiene, gitleaks, actionlint, ktlint, blocks on secrets/APKs/data exports) on every push; Dependabot (`dependabot.yml`) opens weekly update PRs.
 - The debug build type signs with `${rootDir}/debug.keystore` when present (gitignored). Per the AI Studio README, remove `signingConfig = signingConfigs.getByName("debugConfig")` locally if the build fails on signing — but don't commit that change.
-- Secrets come from `.env` via the Secrets Gradle Plugin (`.env.example` is the default). `GEMINI_API_KEY` is only packaged into `BuildConfig` if uncommented in `.env`; app code does not use it yet.
-- Dependency versions live in `gradle/libs.versions.toml`. Unused deps are deliberately left commented out in `app/build.gradle.kts` rather than removed.
+- Dependency versions live in `gradle/libs.versions.toml`. Unused libraries are removed (not commented out), so Dependabot doesn't keep updating them; there is no KSP, Room or Firebase.
 - Robolectric tests run with `@Config(sdk = [36])`.

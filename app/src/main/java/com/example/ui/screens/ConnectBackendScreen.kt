@@ -53,10 +53,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.model.BabySex
 import com.example.data.model.ReminderSettings
 import com.example.data.model.ServerConnectionConfig
@@ -362,7 +364,7 @@ fun ConnectBackendScreen(
                 modifier = Modifier.padding(top = 48.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Baby Buddy", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                 Text(
                     "Connect to your Baby Buddy server to start.",
                     style = MaterialTheme.typography.bodyLarge,

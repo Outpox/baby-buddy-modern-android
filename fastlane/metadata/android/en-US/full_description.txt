@@ -1,0 +1,25 @@
+<p>An unofficial Android client for <a href="https://github.com/babybuddy/babybuddy">Baby Buddy</a>, the open-source, self-hosted baby tracker. It needs your own Baby Buddy server: all data lives there, and the app talks only to it.</p>
+
+<p><b>Track</b></p>
+<ul>
+<li>Breastfeeding with a one-tap left/right timer, bottles, diapers, sleep, pumping, tummy time, baths and notes</li>
+<li>Growth: weight, length and head circumference, with percentiles and charts against the WHO Child Growth Standards</li>
+</ul>
+
+<p><b>Made for two tired parents</b></p>
+<ul>
+<li>A running feed or sleep is shared between phones: the other parent sees the live timer, can switch sides or end it, and ending it on one phone ends it everywhere</li>
+<li>Lock-screen controls for the running feed or sleep, and home-screen widgets for one-tap logging, the live timer and today's totals</li>
+<li>Reminders when a feed is due or the baby has been awake (or asleep) for a while</li>
+<li>Works offline: entries are queued and sent when the server is reachable</li>
+</ul>
+
+<p><b>See the patterns</b></p>
+<ul>
+<li>Today at a glance: last feed and side, next feed estimate, awake time, daily totals</li>
+<li>History of every entry (all editable) and 24-hour rhythm charts for feeds, sleep and diapers</li>
+</ul>
+
+<p>Night mode, 12/24-hour clock, and you choose which items to track. No ads, no analytics, no tracking. Growth percentiles are for information only, not medical advice.</p>
+
+<p>Not affiliated with the Baby Buddy project.</p>

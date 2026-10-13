@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Baby Buddy</string>
+    <string name="app_name">Baby Buddy Companion</string>
     <string name="widget_quick_log_name">Baby Buddy Quick Log</string>
     <string name="widget_quick_log_desc">1-tap logging for feeds, diapers and tummy time.</string>
     <string name="widget_timer_name">Baby Buddy Active Timer</string>

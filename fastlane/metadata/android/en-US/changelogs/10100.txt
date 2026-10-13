@@ -1,0 +1,5 @@
+- New app ID and name (Baby Buddy Companion); install alongside or instead of older builds
+- A feed or sleep ended on the other phone now also ends on this one, even with the app closed
+- Lighter on the battery: the feed notification counts by itself
+- Quick log widget labels no longer cut off; reminders survive restarts
+- Updated libraries

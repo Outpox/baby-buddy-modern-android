@@ -1,4 +1,4 @@
-# Baby Buddy (Android)
+# Baby Buddy Companion (Android)
 
 An unofficial Android client for a self-hosted [Baby Buddy](https://github.com/babybuddy/babybuddy) server — track feeding, sleep, diapers, pumping, tummy time and more, with a live nursing timer that syncs between parents' phones in real time, home-screen widgets, lock-screen notifications and offline-first sync.
 
@@ -13,9 +13,9 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
     <td align="center"><b>Quick Log</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/01-today-dashboard.png" alt="Today dashboard (Day)" width="250"></td>
-    <td><img src="docs/screenshots/06-today-dashboard-night.png" alt="Today dashboard (Night)" width="250"></td>
-    <td><img src="docs/screenshots/02-quick-log.png" alt="Log screen" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/01-today-dashboard.png" alt="Today dashboard (Day)" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/06-today-dashboard-night.png" alt="Today dashboard (Night)" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02-quick-log.png" alt="Log screen" width="250"></td>
   </tr>
   <tr>
     <td align="center"><b>24h Trends</b></td>
@@ -23,9 +23,9 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
     <td align="center"><b>Settings</b></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/03-trends.png" alt="Trends" width="250"></td>
-    <td><img src="docs/screenshots/04-history.png" alt="History" width="250"></td>
-    <td><img src="docs/screenshots/05-settings.png" alt="Settings" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/03-trends.png" alt="Trends" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/04-history.png" alt="History" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/05-settings.png" alt="Settings" width="250"></td>
   </tr>
 </table>
 
@@ -49,7 +49,7 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
 
 ### Home-screen widgets
 
-<img src="docs/screenshots/07-widgets.png" alt="Quick log, nursing timer and today summary widgets on an Android home screen" width="360" align="right">
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/07-widgets.png" alt="Quick log, nursing timer and today summary widgets on an Android home screen" width="360" align="right">
 
 Three home-screen widgets that update straight from the app's state, even when the app is closed:
 
@@ -65,8 +65,8 @@ Add them from the launcher's widget list or from **Customize Today → Phone Hom
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/08-feed-notification.png" alt="Feeding notification with Left, Pause right and End buttons" width="400"></td>
-    <td><img src="docs/screenshots/09-sleep-notification.png" alt="Sleeping notification with a Woke up button" width="400"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/08-feed-notification.png" alt="Feeding notification with Left, Pause right and End buttons" width="400"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/09-sleep-notification.png" alt="Sleeping notification with a Woke up button" width="400"></td>
   </tr>
 </table>
 
@@ -92,7 +92,9 @@ Both can be turned off in Settings → Notifications.
 
 ### Install
 
-Download the APK from the [latest release](https://github.com/liorbass/baby-buddy-modern-android/releases/latest) and open it on your phone (allow installing apps from your browser when Android asks). New releases install over the old one.
+Download the APK from the [latest release](https://github.com/liorbass/baby-buddy-modern-android/releases/latest) and open it on your phone (allow installing apps from your browser when Android asks). New releases install over the old one. To get updates automatically, add this repository to [Obtainium](https://github.com/ImranR98/Obtainium).
+
+From 1.1.0 the app ID is `dev.liorbass.babybuddy`; 1.0.x was a different app ID, so uninstall it after moving over (log in again once).
 
 ### Build
 
@@ -107,7 +109,6 @@ or open the project in Android Studio and run the `app` configuration.
 Notes:
 
 - **Signing:** debug builds use the standard Gradle debug key (or a gitignored `debug.keystore` in the repo root, if present). An APK you build yourself can't update one installed from the releases (different signing key), and vice versa.
-- **`.env`:** the project uses the Secrets Gradle Plugin with `.env` (see `.env.example`). The only key, `GEMINI_API_KEY`, is optional and currently unused by app code — you can skip creating `.env` entirely.
 
 ### Contributing setup
 

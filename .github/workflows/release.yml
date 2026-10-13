@@ -1,13 +1,13 @@
 # Builds a signed release APK and publishes it as a GitHub release.
 #
-# Release a version either way:
-#   - push a tag:      git tag v1.2.0 && git push origin v1.2.0
-#   - or run it by hand: Actions → Release APK → Run workflow, version "1.2.0" (creates the tag v1.2.0)
+# To release: bump versionCode and versionName in app/build.gradle.kts, commit, then either
+#   - push a tag:        git tag v1.2.0 && git push origin v1.2.0
+#   - or run it by hand: Actions -> Release APK -> Run workflow, version "1.2.0" (creates the tag v1.2.0)
 #
-# Versions are MAJOR.MINOR.PATCH (minor and patch below 100). versionName is that version and
-# versionCode is MAJOR*10000 + MINOR*100 + PATCH, so every newer version installs over the older one.
+# Versions are MAJOR.MINOR.PATCH (minor and patch below 100) with versionCode = MAJOR*10000 + MINOR*100 + PATCH.
+# The version lives in the build file (F-Droid reads it there); this workflow stops if the tag doesn't match it.
 #
-# Needs these repository secrets (Settings → Secrets and variables → Actions):
+# Needs these repository secrets (Settings -> Secrets and variables -> Actions):
 #   KEYSTORE_BASE64  the upload keystore (alias "upload"), base64-encoded
 #   STORE_PASSWORD   its store password
 #   KEY_PASSWORD     the key's password
@@ -47,6 +47,13 @@ jobs:
             exit 1
           fi
           code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+          # The build file is the source of truth (F-Droid reads it); the tag must match it
+          gradle_name=$(sed -nE 's/^ *versionName = "([^"]+)".*/\1/p' app/build.gradle.kts)
+          gradle_code=$(sed -nE 's/^ *versionCode = ([0-9]+).*/\1/p' app/build.gradle.kts)
+          if [ "$gradle_name" != "$v" ] || [ "$gradle_code" != "$code" ]; then
+            echo "::error::Tag says $v (code $code) but app/build.gradle.kts has $gradle_name (code $gradle_code). Bump the build file first."
+            exit 1
+          fi
           {
             echo "name=$v"
             echo "code=$code"
@@ -88,9 +95,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease \
-            -PversionName="${{ steps.version.outputs.name }}" \
-            -PversionCode="${{ steps.version.outputs.code }}"
+          ./gradlew :app:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "baby-buddy-${{ steps.version.outputs.name }}.apk"
 
       - name: Publish the release

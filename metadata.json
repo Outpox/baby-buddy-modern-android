@@ -1,6 +1,0 @@
-{
-  "name": "Baby Buddy",
-  "description": "A warm, nurturing companion app for tracking feeding, sleep, and diapers, seamlessly connected to your Baby Buddy instance.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

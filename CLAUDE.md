@@ -18,7 +18,9 @@ The Gradle wrapper (Gradle 9.6.0; AGP 9.4, Kotlin 2.4, compileSdk 37, targetSdk 
 ./gradlew :app:connectedDebugAndroidTest     # instrumented tests (needs device/emulator)
 ```
 
-Releases: `.github/workflows/release.yml` builds a signed `assembleRelease` APK and attaches it to a GitHub release when a `vX.Y.Z` tag is pushed (or run by hand with a version). It passes `-PversionName=X.Y.Z -PversionCode=X*10000+Y*100+Z` (read in `defaultConfig`; local builds default to 1 / "1.0") and signs with the existing `release` signing config via `KEYSTORE_PATH`/`STORE_PASSWORD`/`KEY_PASSWORD`, from the repo secrets `KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD` (key alias `upload`).
+Releases: `.github/workflows/release.yml` builds a signed `assembleRelease` APK and attaches it to a GitHub release when a `vX.Y.Z` tag is pushed (or run by hand with a version). `versionCode`/`versionName` are literals in `app/build.gradle.kts` (F-Droid reads them there; versionCode = X*10000+Y*100+Z): bump both, commit, then tag; the workflow fails if the tag doesn't match. It signs with the existing `release` signing config via `KEYSTORE_PATH`/`STORE_PASSWORD`/`KEY_PASSWORD`, from the repo secrets `KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD` (key alias `upload`).
+
+Store listing (F-Droid / IzzyOnDroid): `fastlane/metadata/android/en-US/` holds the title, short (≤80 chars) and full description, `changelogs/<versionCode>.txt` (add one per release) and `images/phoneScreenshots/` (also used by the README; demo data only). The F-Droid build recipe draft is `docs/fdroid/dev.liorbass.babybuddy.yml`.
 
 Pre-commit (`.pre-commit-config.yaml`, pre-commit.com; `pre-commit install` per clone, also run in CI on every push by `.github/workflows/checks.yml`; `build.yml` builds the debug APK and runs unit tests, skipping docs-only pushes): pre-commit-hooks hygiene, gitleaks (extra rules in `.gitleaks.toml`: Baby Buddy API keys, private IPs), actionlint, ktlint via `pretty-format-kotlin` (rules in `.editorconfig`, IntelliJ style tuned to this code: no trailing commas, comments after parameters allowed; `app/build.gradle.kts` excluded), blocks on keystores/`.env`/`local.properties`/APKs/data exports, and `tools/hooks/check-personal-words.sh` against the gitignored `tools/hooks/blocklist.local`. Never put real names, the server address or tokens in code, docs or screenshots; demo data uses "Sam"/"Alex".
 
@@ -26,18 +28,17 @@ Formatting/lint: ktlint through pre-commit (see above); `kotlin.code.style=offic
 
 Build notes:
 - The debug build type signs with `${rootDir}/debug.keystore` (gitignored, not present locally). Per the README, remove `signingConfig = signingConfigs.getByName("debugConfig")` from `app/build.gradle.kts` locally if the build fails on signing — but the file comments say not to modify the signing configs for AI Studio, so don't commit that change.
-- Secrets come from `.env` via the Secrets Gradle Plugin (`.env.example` is the default). `GEMINI_API_KEY` is only packaged into `BuildConfig` if uncommented in `.env`.
 - No Firebase or other Google services (removed: they were unused). Dependabot (`.github/dependabot.yml`) opens weekly grouped PRs for Gradle and Actions; bump pre-commit hooks with `pre-commit autoupdate`.
-- Dependency versions live in `gradle/libs.versions.toml`. Unused deps are deliberately left commented out in `app/build.gradle.kts` rather than removed.
+- Dependency versions live in `gradle/libs.versions.toml`. Unused libraries are removed (not commented out), so Dependabot doesn't keep updating them; there is no KSP, Room or Firebase.
 - Robolectric tests run with `@Config(sdk = [36])`. Robolectric 4.17 needs the `--add-exports`/`--add-opens` JVM flags set in `testOptions` (`app/build.gradle.kts`).
 
 ## Architecture
 
-Package root is `com.example` (applicationId `com.aistudio.babybuddy.nvzpkq`).
+Package root is `com.example` (applicationId `dev.liorbass.babybuddy`; app name "Baby Buddy Companion").
 
 **State flow:** `BabyBuddyRepository` (singleton via `BabyBuddyRepository.instance`) is the single source of truth, holding all app state as `MutableStateFlow`s. `MainViewModel` re-exposes those flows, owns UI-only state (current screen, toast, modal visibility), and wraps repository mutations with user-facing toasts. Composables receive the ViewModel/state and callbacks from `MainActivity`.
 
-**Persistence.** `BabyBuddyApplication` calls `repository.attach(context)` on every process start. Saved state: the server login in SharedPreferences `baby_buddy` (API token encrypted with an Android Keystore key via `SecretCipher`), the running nursing timer (same prefs), and in `filesDir/offline/` (`OfflineStore`, Moshi JSON) the unsent-write queue and a cache of today's entries. These are excluded from backups. Without a saved login the app shows only the login screen (`needsLogin` in `BabyBuddyApp`); demo mode has no UI entry. Room is a dependency but unused.
+**Persistence.** `BabyBuddyApplication` calls `repository.attach(context)` on every process start. Saved state: the server login in SharedPreferences `baby_buddy` (API token encrypted with an Android Keystore key via `SecretCipher`), the running nursing timer (same prefs), and in `filesDir/offline/` (`OfflineStore`, Moshi JSON) the unsent-write queue and a cache of today's entries. These are excluded from backups. Without a saved login the app shows only the login screen (`needsLogin` in `BabyBuddyApp`); demo mode has no UI entry.
 
 **Navigation** is not Navigation-Compose: it's a `ScreenDestination` enum in `MainViewModel` and a `when (currentScreen)` switch in `BabyBuddyApp` in `MainActivity.kt`. Adding a screen means adding an enum value and a branch there. Back handling returns to `TODAY_DASHBOARD`.
 
