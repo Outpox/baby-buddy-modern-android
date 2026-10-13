@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Re-arms reminders after a restart; alarms don't survive one -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Keeps a running feed/sleep in step with the other phones while the app is closed (TimerSyncService) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".BabyBuddyApplication"
@@ -89,6 +92,16 @@
                 <action android:name="com.example.babybuddy.ACTION_REMIND" />
             </intent-filter>
         </receiver>
+
+        <!-- Runs only while a feed or sleep is timed: checks whether another phone ended it -->
+        <service
+            android:name=".widget.TimerSyncService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Live baby feeding/sleep timer shared between caregivers' phones; follows changes made on another phone" />
+        </service>
 
         <!-- Restores reminders (and the lock-screen timers) after a restart, an app update or a clock change -->
         <receiver

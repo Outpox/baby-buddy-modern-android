@@ -5,6 +5,7 @@ import com.example.data.repository.BabyBuddyRepository
 import com.example.widget.FeedNotification
 import com.example.widget.Reminders
 import com.example.widget.SleepNotification
+import com.example.widget.TimerSyncService
 import com.example.widget.WidgetManagerHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,8 +27,8 @@ class BabyBuddyApplication : Application() {
         val repository = BabyBuddyRepository.instance
         repository.attach(this)
         appScope.launch {
-            // Lock-screen feed controls: refresh every second while a side runs (so the L/R times count up),
-            // and on start/pause/switch/end/edits and when the setting changes
+            // Lock-screen feed controls: re-posted on start/pause/switch/end/edits (also from another phone) and
+            // when the setting changes; in between, the notification's chronometer counts by itself
             combine(
                 repository.liveTimerState
                     .map {
@@ -37,7 +38,8 @@ class BabyBuddyApplication : Application() {
                             it.activeBreast,
                             it.feedingLocalId,
                             it.editCount,
-                            if (it.isRunning && !it.isPaused) it.totalSeconds else -1
+                            it.sessionStartMillis,
+                            it.changedAtMillis
                         )
                     }
                     .distinctUntilChanged(),
@@ -51,6 +53,16 @@ class BabyBuddyApplication : Application() {
             combine(repository.sleepTimer, repository.feedNotificationEnabled) { sleep, enabled -> sleep to enabled }
                 .distinctUntilChanged()
                 .collect { (sleep, enabled) -> SleepNotification.update(this@BabyBuddyApplication, sleep, enabled) }
+        }
+        appScope.launch {
+            // While a feed or sleep runs, keep following the other phones even with the app closed
+            combine(
+                repository.liveTimerState.map { it.isRunning },
+                repository.sleepTimer.map { it.isRunning },
+                repository.feedNotificationEnabled
+            ) { feed, sleep, enabled -> Triple(feed, sleep, enabled) }
+                .distinctUntilChanged()
+                .collect { (feed, sleep, enabled) -> TimerSyncService.sync(this@BabyBuddyApplication, feed || sleep, enabled) }
         }
         appScope.launch {
             // Feed-due / awake reminders follow every feed, sleep and settings change, from any phone

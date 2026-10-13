@@ -182,6 +182,7 @@ Settings kept only on the phone: your caregiver name, theme, clock format, remin
 | Internet | Talk to your Baby Buddy server |
 | Notifications (Android 13+, asked when lock-screen timers or reminders are on) | Lock-screen feed/sleep timers and reminders |
 | Run at startup | Set reminders again after the phone restarts (alarms don't survive a restart) |
+| Run in the background (foreground service) | Only while a feed or sleep is being timed: keeps the lock-screen timer in step with the other parent's phone, so a feed ended there also ends here |
 
 No location, contacts, camera, microphone or storage access.
 

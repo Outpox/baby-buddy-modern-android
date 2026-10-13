@@ -1,6 +1,7 @@
 package com.example.widget
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -21,7 +22,7 @@ object SleepNotification {
 
     private const val CHANNEL_ID = "sleep_timer"
     private const val CHANNEL_NAME = "Sleep timer"
-    private const val NOTIFICATION_ID = 4202
+    const val NOTIFICATION_ID = 4202
 
     private const val REQUEST_CONTENT = 4220
     private const val REQUEST_STOP = 4221
@@ -38,10 +39,18 @@ object SleepNotification {
         ) {
             return
         }
-        ensureChannel(context)
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, build(context, state))
+        } catch (_: SecurityException) {
+            // Permission revoked between the check and notify; nothing to do.
+        }
+    }
 
+    /** The notification for a running sleep (also [TimerSyncService]'s foreground notification when no feed runs). */
+    fun build(context: Context, state: SleepTimerState): Notification {
+        ensureChannel(context)
         // The start never changes while it runs, so the system chronometer can count on its own
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_widget_sleep)
             .setContentTitle("Sleeping")
             .setContentText("Since ${TimeFormat.clock(state.startMillis)}")
@@ -56,12 +65,7 @@ object SleepNotification {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(contentIntent(context))
             .addAction(0, "Woke up", stopIntent(context))
-
-        try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, builder.build())
-        } catch (_: SecurityException) {
-            // Permission revoked between the check and notify; nothing to do.
-        }
+            .build()
     }
 
     private fun ensureChannel(context: Context) {

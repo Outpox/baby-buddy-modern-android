@@ -1,6 +1,7 @@
 package com.example.widget
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -20,12 +21,15 @@ import com.example.data.model.TimeFormat
 /**
  * Ongoing, lock-screen-visible notification for a running or paused breastfeed,
  * with Left / Right / End actions handled by [WidgetActionReceiver].
+ *
+ * While a side runs, the system chronometer counts the total by itself, so the notification is only
+ * re-posted when something changes (start, pause, side switch, edits), not every second.
  */
 object FeedNotification {
 
+    const val NOTIFICATION_ID = 4201
     private const val CHANNEL_ID = "feeding"
     private const val CHANNEL_NAME = "Breastfeeding timer"
-    private const val NOTIFICATION_ID = 4201
 
     private const val REQUEST_CONTENT = 4210
     private const val REQUEST_LEFT = 4211
@@ -44,8 +48,16 @@ object FeedNotification {
         ) {
             return
         }
-        ensureChannel(context)
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, build(context, state))
+        } catch (_: SecurityException) {
+            // Permission revoked between the check and notify; nothing to do.
+        }
+    }
 
+    /** The notification for a running feed (also used as [TimerSyncService]'s foreground notification). */
+    fun build(context: Context, state: LiveTimerState): Notification {
+        ensureChannel(context)
         val running = !state.isPaused
         val title = when {
             !running -> "Feed paused"
@@ -69,14 +81,15 @@ object FeedNotification {
             .addAction(0, rightLabel, actionIntent(context, WidgetActionReceiver.ACTION_TAP_RIGHT, REQUEST_RIGHT))
             .addAction(0, "End", actionIntent(context, WidgetActionReceiver.ACTION_END_FEED, REQUEST_END))
 
-        // Called every second while a side runs, so the times in the text are current
         val started = if (state.sessionStartMillis > 0) " · started ${TimeFormat.clock(state.sessionStartMillis)}" else ""
         if (running) {
+            // The chronometer counts the total; only the running side grows, so the other side's time stays exact
+            val other = if (state.activeBreast == BreastSide.LEFT) "R ${formatDuration(state.rightSeconds)}" else "L ${formatDuration(state.leftSeconds)}"
             builder
-                .setUsesChronometer(false)
-                .setShowWhen(false)
-                .setSubText(formatDuration(state.totalSeconds))
-                .setContentText("L ${formatDuration(state.leftSeconds)} · R ${formatDuration(state.rightSeconds)}$started")
+                .setUsesChronometer(true)
+                .setWhen(System.currentTimeMillis() - state.totalSeconds * 1000L)
+                .setShowWhen(true)
+                .setContentText("$other$started")
         } else {
             builder
                 .setUsesChronometer(false)
@@ -87,12 +100,7 @@ object FeedNotification {
                         "L ${formatDuration(state.leftSeconds)} · R ${formatDuration(state.rightSeconds)}$started"
                 )
         }
-
-        try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, builder.build())
-        } catch (_: SecurityException) {
-            // Permission revoked between the check and notify; nothing to do.
-        }
+        return builder.build()
     }
 
     fun cancel(context: Context) {

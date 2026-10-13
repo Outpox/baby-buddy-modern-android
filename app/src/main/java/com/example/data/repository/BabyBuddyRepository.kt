@@ -1873,7 +1873,8 @@ class BabyBuddyRepository {
             remoteId = feedTimerRemoteId,
             isOurs = { SharedTimers.decodeFeed(it) != null },
             setRemoteId = ::setFeedTimerRemoteId,
-            channel = feedTimerDirty
+            channel = feedTimerDirty,
+            onGone = { feedEndedElsewhere(System.currentTimeMillis()) }
         )
     }
 
@@ -1885,7 +1886,8 @@ class BabyBuddyRepository {
             remoteId = sleepTimerRemoteId,
             isOurs = { SharedTimers.decodeSleep(it) != null },
             setRemoteId = ::setSleepTimerRemoteId,
-            channel = sleepTimerDirty
+            channel = sleepTimerDirty,
+            onGone = { sleepEndedElsewhere(System.currentTimeMillis()) }
         )
     }
 
@@ -1896,7 +1898,8 @@ class BabyBuddyRepository {
         remoteId: Long?,
         isOurs: (String?) -> Boolean,
         setRemoteId: (Long?) -> Unit,
-        channel: Channel<Unit>
+        channel: Channel<Unit>,
+        onGone: () -> Unit
     ) {
         val api = remoteApi ?: return
         val child = remoteChildId ?: return
@@ -1925,6 +1928,13 @@ class BabyBuddyRepository {
                     return
                 }
                 if (response.code() != 404) return
+                if (id == remoteId) {
+                    // Our timer was deleted: the feed/sleep was ended on another phone. Recreating it would bring
+                    // it back on every phone, so end it here too and fetch the finished entry.
+                    onGone()
+                    syncToday(api, auth, child)
+                    return
+                }
             }
             // The server rejects starts in the future, so allow for this phone's clock being ahead
             val now = System.currentTimeMillis()
@@ -1970,10 +1980,7 @@ class BabyBuddyRepository {
             val local = _liveTimerState.value
             if (feed == null) {
                 if (local.isRunning && feedTimerRemoteId != null) {
-                    // Ended on another phone; its last update already reached the feeding record
-                    setFeedTimerRemoteId(null)
-                    feedEndedAt = now
-                    _liveTimerState.value = LiveTimerState(softChimeEnabled = local.softChimeEnabled)
+                    feedEndedElsewhere(now)
                     endedElsewhere = true
                 }
             } else {
@@ -1994,10 +2001,7 @@ class BabyBuddyRepository {
             val localSleep = _sleepTimer.value
             if (sleep == null) {
                 if (localSleep.isRunning && sleepTimerRemoteId != null) {
-                    // Stopped (and saved) on another phone
-                    setSleepTimerRemoteId(null)
-                    setSleepTimer(SleepTimerState())
-                    sleepEndedAt = now
+                    sleepEndedElsewhere(now)
                     endedElsewhere = true
                 }
             } else {
@@ -2016,6 +2020,34 @@ class BabyBuddyRepository {
             }
         }
         if (endedElsewhere) syncToday(api, auth, child) // fetch the finished feed/sleep
+    }
+
+    /**
+     * The feed's shared timer is gone: another phone ended it and saved its final times. Stop here without
+     * writing anything, and drop this phone's queued minute-saves, which would overwrite those times.
+     */
+    private fun feedEndedElsewhere(now: Long) {
+        val local = _liveTimerState.value
+        local.feedingLocalId?.let { dropQueuedUpdates(ENDPOINT_FEEDINGS, it) }
+        setFeedTimerRemoteId(null)
+        feedEndedAt = now
+        _liveTimerState.value = LiveTimerState(softChimeEnabled = local.softChimeEnabled)
+    }
+
+    /** The sleep's shared timer is gone: it was stopped (and saved) on another phone. */
+    private fun sleepEndedElsewhere(now: Long) {
+        setSleepTimerRemoteId(null)
+        setSleepTimer(SleepTimerState())
+        sleepEndedAt = now
+    }
+
+    /** Drops queued, unsent edits of one entry (the head of the queue may be in flight, so it stays). */
+    private fun dropQueuedUpdates(endpoint: String, localId: Long) = synchronized(pendingWrites) {
+        val head = pendingWrites.firstOrNull()
+        val dropped = pendingWrites.removeAll {
+            it !== head && it.endpoint == endpoint && it.localId == localId && it.action == QueuedWrite.ACTION_UPDATE
+        }
+        if (dropped) queueChanged()
     }
 
     /** Takes over a feed from another phone, counting the running side forward from the snapshot. */
