@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-Android 12 backup. The login, timer and unsent-entry files are device-specific (the token is
+     encrypted with a key that never leaves this device), so they are not backed up. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="baby_buddy.xml" />
+    <exclude domain="file" path="offline" />
+</full-backup-content>

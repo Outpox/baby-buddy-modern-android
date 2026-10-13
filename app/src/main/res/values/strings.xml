@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Baby Buddy</string>
+    <string name="widget_quick_log_name">Baby Buddy Quick Log</string>
+    <string name="widget_quick_log_desc">1-tap logging for feeds, diapers and tummy time.</string>
+    <string name="widget_timer_name">Baby Buddy Active Timer</string>
+    <string name="widget_timer_desc">Live nursing timer controls with pause, resume, and breast switching directly on your home screen.</string>
+    <string name="widget_summary_name">Baby Buddy Today Summary</string>
+    <string name="widget_summary_desc">Today\'s feeds and diapers at a glance.</string>
+</resources>

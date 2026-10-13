@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ backup/transfer. See backup_rules.xml for why these are excluded. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="baby_buddy.xml" />
+        <exclude domain="file" path="offline" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="baby_buddy.xml" />
+        <exclude domain="file" path="offline" />
+    </device-transfer>
+</data-extraction-rules>

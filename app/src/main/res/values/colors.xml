@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="bb_primary">#FF9A442D</color>
+    <color name="bb_primary_container">#FFE07A5F</color>
+    <color name="bb_on_primary">#FFFFFFFF</color>
+    <color name="bb_secondary">#FF5E6A2E</color>
+    <color name="bb_secondary_container">#FFE6EACB</color>
+    <!-- Item colors, matching ui/theme/ItemColors.kt -->
+    <color name="bb_diaper">#FF8A6A0E</color>
+    <color name="bb_sleep">#FF7D4A66</color>
+    <color name="bb_surface">#FFF7FAF5</color>
+    <color name="bb_surface_container">#FFECEFEA</color>
+    <color name="bb_surface_card">#FFFFFFFF</color>
+    <color name="bb_on_surface">#FF191C1A</color>
+    <color name="bb_on_surface_variant">#FF55423E</color>
+    <color name="bb_outline">#FFDBC1BA</color>
+</resources>

@@ -1,0 +1,70 @@
+# Gradle / build
+.gradle/
+.kotlin/
+build/
+/captures
+.externalNativeBuild/
+.cxx/
+*.hprof
+*.log
+
+# Build outputs (released through GitHub Actions, never committed)
+*.apk
+*.aab
+*.apks
+*.idsig
+/app/release/
+/app/debug/
+output-metadata.json
+
+# Local configuration
+local.properties
+
+# Secrets — never commit (.env.example is the safe template)
+.env
+.env.*
+!.env.example
+google-services.json
+keystore.properties
+signing.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+
+# Personal data exports and scratch (e.g. baby-tracker CSV exports, server dumps)
+*.csv
+*.xlsx
+export_*
+*.sqlite
+*.db
+
+# Local-only list of personal words the pre-commit hook blocks (see .pre-commit-config.yaml)
+tools/hooks/blocklist.local
+
+# IDE
+*.iml
+.idea/caches
+.idea/libraries
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/deploymentTargetSelector.xml
+.idea/deviceManager.xml
+.idea/shelf
+.idea/dictionaries
+.idea/httpRequests
+.idea/caches
+.idea/studiobot.xml
+.idea/other.xml
+.vscode/
+
+# AI assistant local state
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

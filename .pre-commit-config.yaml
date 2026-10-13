@@ -1,0 +1,72 @@
+# Pre-commit hooks (https://pre-commit.com). Set up once per clone:
+#   uv tool install pre-commit   (or: pipx install pre-commit / pip install pre-commit)
+#   pre-commit install
+# Run on everything:  pre-commit run --all-files      Update hook versions:  pre-commit autoupdate
+# Skip in an emergency: git commit --no-verify
+# The Kotlin formatter needs Java 11+ on PATH (Android Studio's bundled JBR works).
+
+default_install_hook_types: [pre-commit]
+exclude: ^app/src/main/java/com/example/data/model/WhoGrowthStandards\.kt$ # generated WHO tables
+
+repos:
+  # General hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=5120]
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-executables-have-shebangs
+      - id: detect-private-key
+
+  # Secrets (API keys, tokens, passwords); extra rules in .gitleaks.toml
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # GitHub Actions workflows
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  # Kotlin formatting and lint (ktlint, configured in .editorconfig); fixes what it can, then re-stage
+  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+    rev: v2.16.0
+    hooks:
+      - id: pretty-format-kotlin
+        args: [--autofix, --ktlint-version=1.8.0]
+        exclude: ^app/build\.gradle\.kts$ # AI Studio's signing config there must stay as written
+
+  - repo: local
+    hooks:
+      - id: forbid-secret-files
+        name: no keystores, .env or local config
+        language: fail
+        entry: "These hold secrets or machine-specific config and must not be committed:"
+        files: (^|/)(\.env(\..*)?|local\.properties|google-services\.json|keystore\.properties|signing\.properties|.*\.(jks|keystore|p12|pem|key))$
+        exclude: (^|/)\.env\.example$
+      - id: forbid-build-output
+        name: no APKs or bundles (releases come from GitHub Actions)
+        language: fail
+        entry: "Build output must not be committed:"
+        files: \.(apk|aab|apks|idsig)$
+      - id: forbid-data-exports
+        name: no data exports (they hold personal data)
+        language: fail
+        entry: "Looks like a data export, which may contain personal data:"
+        files: (\.(csv|xlsx|sqlite|db)$|(^|/)export_)
+      - id: personal-words
+        name: no personal words (tools/hooks/blocklist.local)
+        language: script
+        entry: tools/hooks/check-personal-words.sh
+        types: [text]

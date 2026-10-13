@@ -1,0 +1,23 @@
+# gitleaks rules: the built-in set plus what's specific to this project.
+title = "baby-buddy"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "baby-buddy-api-key"
+description = "Baby Buddy API key (the token sent as 'Authorization: Token …')"
+regex = '''(?i)\btoken[\s:=\"']+([0-9a-f]{40})\b'''
+secretGroup = 1
+keywords = ["token"]
+
+[[rules]]
+id = "private-network-address"
+description = "Private network address, e.g. a home server's IP"
+regex = '''\b((?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3})\b'''
+secretGroup = 1
+keywords = ["192.168.", "10.", "172."]
+
+[allowlist]
+description = "Generated WHO growth tables (numbers only)"
+paths = ['''WhoGrowthStandards\.kt$''']

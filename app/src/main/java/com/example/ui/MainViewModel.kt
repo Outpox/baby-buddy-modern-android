@@ -1,0 +1,639 @@
+package com.example.ui
+
+import android.content.Context
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.data.model.BATH_TAG
+import com.example.data.model.BabyProfile
+import com.example.data.model.BabySex
+import com.example.data.model.BreastSide
+import com.example.data.model.DashboardWidgetConfig
+import com.example.data.model.DashboardWidgetType
+import com.example.data.model.DayStats
+import com.example.data.model.DiaperEvent
+import com.example.data.model.DiaperType
+import com.example.data.model.FeedIntervalStats
+import com.example.data.model.FeedingEvent
+import com.example.data.model.GrowthEvent
+import com.example.data.model.GrowthKind
+import com.example.data.model.HistoryDay
+import com.example.data.model.LiveTimerState
+import com.example.data.model.NoteEvent
+import com.example.data.model.NoteTag
+import com.example.data.model.PumpingEvent
+import com.example.data.model.QuickAction
+import com.example.data.model.ReminderSettings
+import com.example.data.model.ServerConnectionConfig
+import com.example.data.model.SleepEvent
+import com.example.data.model.SleepTimerState
+import com.example.data.model.TemperatureEvent
+import com.example.data.model.ThemeMode
+import com.example.data.model.TimeFormat
+import com.example.data.model.TrackedItem
+import com.example.data.model.TummyTimeEvent
+import com.example.data.model.TummyTimeGoal
+import com.example.data.model.formatGrowth
+import com.example.data.model.formatMinutes
+import com.example.data.repository.BabyBuddyRepository
+import com.example.widget.BabyBuddyQuickLogWidget
+import com.example.widget.BabyBuddySummaryWidget
+import com.example.widget.BabyBuddyTimerWidget
+import com.example.widget.WidgetManagerHelper
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+enum class ScreenDestination {
+    TODAY_DASHBOARD,
+    TRENDS,
+    ACTIVE_NURSING_TIMER,
+    LOG_DIAPER,
+    QUICK_LOG_MODAL,
+    HISTORY,
+    SLEEP,
+    CONNECT_SERVER
+}
+
+/** Which entries the History list shows. */
+enum class HistoryFilter(val label: String) {
+    ALL("All"),
+    FEEDS("Feeds"),
+    DIAPERS("Diapers"),
+    PUMPING("Pumping"),
+    TUMMY("Tummy time"),
+    SLEEP("Sleep"),
+    BATH("Baths"),
+    NOTES("Notes")
+}
+
+data class UiNotification(
+    val message: String,
+    val isSuccess: Boolean = true,
+    val timestamp: Long = System.currentTimeMillis(),
+    /** When set, the toast shows an Undo button that runs this. */
+    val undo: (() -> Unit)? = null
+)
+
+class MainViewModel(
+    private val repository: BabyBuddyRepository = BabyBuddyRepository.instance
+) : ViewModel() {
+
+    private val _currentScreen = MutableStateFlow(ScreenDestination.TODAY_DASHBOARD)
+    val currentScreen: StateFlow<ScreenDestination> = _currentScreen.asStateFlow()
+
+    private val _notification = MutableStateFlow<UiNotification?>(null)
+    val notification: StateFlow<UiNotification?> = _notification.asStateFlow()
+
+    private val _showAddWidgetModal = MutableStateFlow(false)
+    val showAddWidgetModal: StateFlow<Boolean> = _showAddWidgetModal.asStateFlow()
+
+    val babyProfile: StateFlow<BabyProfile> = repository.babyProfile
+    val connectionConfig: StateFlow<ServerConnectionConfig> = repository.connectionConfig
+    val liveTimerState: StateFlow<LiveTimerState> = repository.liveTimerState
+    val feedings: StateFlow<List<FeedingEvent>> = repository.feedings
+    val sleeps: StateFlow<List<SleepEvent>> = repository.sleeps
+    val sleepTimer: StateFlow<SleepTimerState> = repository.sleepTimer
+    val diapers: StateFlow<List<DiaperEvent>> = repository.diapers
+    val tummyTimes: StateFlow<List<TummyTimeEvent>> = repository.tummyTimes
+    val pumpings: StateFlow<List<PumpingEvent>> = repository.pumpings
+    val lastBreastfeed: StateFlow<FeedingEvent?> = repository.lastBreastfeed
+    val quickActions: StateFlow<List<QuickAction>> = repository.quickActions
+    fun setQuickActions(actions: List<QuickAction>) = repository.setQuickActions(actions)
+
+    private val _historyFilter = MutableStateFlow(HistoryFilter.ALL)
+    val historyFilter: StateFlow<HistoryFilter> = _historyFilter.asStateFlow()
+    fun setHistoryFilter(filter: HistoryFilter) {
+        _historyFilter.value = filter
+    }
+
+    /** Opens History's list on this week, showing only [filter] entries. */
+    fun openHistory(filter: HistoryFilter) {
+        _historyFilter.value = filter
+        navigateTo(ScreenDestination.HISTORY)
+    }
+    val isServerDisconnectedView: StateFlow<Boolean> = repository.isServerDisconnectedView
+    val pendingWriteCount: StateFlow<Int> = repository.pendingWriteCount
+
+    // Trends (loaded from the server when the Trends tab opens)
+    private val _trendsRange = MutableStateFlow(7)
+    val trendsRange: StateFlow<Int> = _trendsRange.asStateFlow()
+    private val _trendsDays = MutableStateFlow<List<DayStats>?>(null)
+    val trendsDays: StateFlow<List<DayStats>?> = _trendsDays.asStateFlow()
+    private val _trendsLoading = MutableStateFlow(false)
+    val trendsLoading: StateFlow<Boolean> = _trendsLoading.asStateFlow()
+    private val _trendsError = MutableStateFlow<String?>(null)
+    val trendsError: StateFlow<String?> = _trendsError.asStateFlow()
+    private var trendsJob: Job? = null
+
+    // History week calendar
+    private val _historyLastDay = MutableStateFlow(System.currentTimeMillis())
+    private val _historyLoaded = MutableStateFlow<List<HistoryDay>?>(null)
+    private val _historyLoading = MutableStateFlow(false)
+    val historyLoading: StateFlow<Boolean> = _historyLoading.asStateFlow()
+    private val _historyError = MutableStateFlow<String?>(null)
+    val historyError: StateFlow<String?> = _historyError.asStateFlow()
+    private var historyJob: Job? = null
+
+    /** Loaded week, with today's column always reflecting the live local entries (including unsent ones). */
+    val historyDays: StateFlow<List<HistoryDay>?> = combine(
+        _historyLoaded,
+        combine(repository.feedings, repository.diapers, repository.tummyTimes) { f, d, t -> Triple(f, d, t) },
+        combine(repository.pumpings, repository.sleeps, repository.notes) { p, s, n -> Triple(p, s, n) }
+    ) { days, (feeds, diapers, tummies), (pumps, sleeps, notes) ->
+        val todayStart = startOfDay(System.currentTimeMillis())
+        days?.map { day ->
+            if (day.dayStartMillis == todayStart) {
+                day.copy(
+                    feedings = feeds,
+                    diapers = diapers,
+                    tummyTimes = tummies,
+                    pumpings = pumps,
+                    sleeps = sleeps.filter { it.timeMillis >= todayStart },
+                    baths = notes.filter { BATH_TAG in it.tags && it.timeMillis >= todayStart },
+                    notes = notes.filter { BATH_TAG !in it.tags && it.timeMillis >= todayStart }
+                )
+            } else {
+                day
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val historyIsCurrentWeek: StateFlow<Boolean> = _historyLastDay
+        .map { startOfDay(it) >= startOfDay(System.currentTimeMillis()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    fun loadHistory() {
+        historyJob?.cancel()
+        historyJob = viewModelScope.launch {
+            _historyLoading.value = true
+            _historyError.value = null
+            repository.loadHistory(_historyLastDay.value)
+                .onSuccess { _historyLoaded.value = it }
+                .onFailure { _historyError.value = it.localizedMessage ?: "Couldn't load history" }
+            _historyLoading.value = false
+        }
+    }
+
+    fun shiftHistoryWeek(weeks: Int) {
+        val next = _historyLastDay.value + weeks * 7L * 86_400_000L
+        _historyLastDay.value = minOf(next, System.currentTimeMillis())
+        loadHistory()
+    }
+
+    /** Applies an edit/delete to the loaded week right away (older days aren't in the live lists). */
+    private fun patchHistory(transform: (HistoryDay) -> HistoryDay) {
+        _historyLoaded.value = _historyLoaded.value?.map(transform)
+    }
+
+    private fun startOfDay(millis: Long): Long = java.util.Calendar.getInstance().apply {
+        timeInMillis = millis
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    fun loadTrends(days: Int = _trendsRange.value) {
+        _trendsRange.value = days
+        trendsJob?.cancel()
+        trendsJob = viewModelScope.launch {
+            _trendsLoading.value = true
+            _trendsError.value = null
+            repository.loadTrends(days)
+                .onSuccess { _trendsDays.value = it }
+                .onFailure { _trendsError.value = it.localizedMessage ?: "Couldn't load trends" }
+            _trendsLoading.value = false
+        }
+    }
+
+    // Widgets State
+    val dashboardWidgets: StateFlow<List<DashboardWidgetConfig>> = repository.dashboardWidgets
+    val tummyTimeGoal: StateFlow<TummyTimeGoal> = repository.tummyTimeGoal
+    val temperatures: StateFlow<List<TemperatureEvent>> = repository.temperatures
+    val notes: StateFlow<List<NoteEvent>> = repository.notes
+    val growth: StateFlow<List<GrowthEvent>> = repository.growth
+    val babySex: StateFlow<BabySex?> = repository.babySex
+
+    fun setBabySex(sex: BabySex) = repository.setBabySex(sex)
+
+    // Settings
+    val caregiverName: StateFlow<String> = repository.caregiverName
+    val feedNotificationEnabled: StateFlow<Boolean> = repository.feedNotificationEnabled
+    val use24h: StateFlow<Boolean> = repository.use24h
+    fun setUse24h(enabled: Boolean) {
+        repository.setUse24h(enabled)
+        if (_historyLoaded.value != null) loadHistory() // past days carry formatted times too
+    }
+    fun setCaregiverName(name: String) = repository.setCaregiverName(name)
+    val themeMode: StateFlow<ThemeMode> = repository.themeMode
+    fun setThemeMode(mode: ThemeMode) = repository.setThemeMode(mode)
+    fun setFeedNotificationEnabled(enabled: Boolean) = repository.setFeedNotificationEnabled(enabled)
+
+    // Feed-interval card on Today
+    private val _feedIntervals = MutableStateFlow<FeedIntervalStats?>(null)
+    val feedIntervals: StateFlow<FeedIntervalStats?> = _feedIntervals.asStateFlow()
+
+    /** Pulls entries other caregivers logged, plus the feed-interval card. Called on resume, periodically and on pull-to-refresh. */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+    private var refreshJob: Job? = null
+
+    fun refresh() {
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch {
+            _isRefreshing.value = true
+            if (repository.refresh()) {
+                repository.loadFeedIntervals().onSuccess { _feedIntervals.value = it }
+            }
+            _isRefreshing.value = false
+        }
+    }
+
+    init {
+        viewModelScope.launch {
+            repository.syncErrors.collect { showToast(it, isSuccess = false) }
+        }
+    }
+
+    fun navigateTo(destination: ScreenDestination) {
+        _currentScreen.value = destination
+        if (destination == ScreenDestination.TRENDS) loadTrends()
+        if (destination == ScreenDestination.HISTORY) {
+            _historyLastDay.value = System.currentTimeMillis()
+            loadHistory()
+        }
+    }
+
+    fun logBottle(ml: Int, formula: Boolean, notes: String = "", timeMillis: Long? = null) {
+        val id = repository.logBottle(ml, formula, timeMs = timeMillis ?: System.currentTimeMillis(), notes = notes)
+        showToast("Bottle logged: $ml ml ${if (formula) "formula" else "breast milk"}", undo = { repository.deleteFeeding(id) })
+    }
+
+    fun logPumping(ml: Int, minutes: Int, notes: String, startMillis: Long? = null) {
+        val id = repository.logPumping(ml, minutes, notes, startMillis)
+        showToast("Pumping logged: $ml ml", undo = { repository.deletePumping(id) })
+    }
+
+    fun updatePumping(pumping: PumpingEvent) {
+        repository.updatePumping(pumping)
+        patchHistory { d -> d.copy(pumpings = d.pumpings.map { if (it.id == pumping.id) pumping else it }) }
+        showToast("Pumping updated")
+    }
+
+    fun deletePumping(id: Long) {
+        repository.deletePumping(id)
+        patchHistory { d -> d.copy(pumpings = d.pumpings.filterNot { it.id == id }) }
+        showToast("Pumping deleted")
+    }
+
+    fun setLiveFeedNotes(notes: String) = repository.setLiveFeedNotes(notes)
+
+    fun liveFeedNotes(): String = repository.liveFeedUserNotes()
+
+    fun updateFeeding(feeding: FeedingEvent) {
+        repository.updateFeeding(feeding)
+        patchHistory { d -> d.copy(feedings = d.feedings.map { if (it.id == feeding.id) feeding else it }) }
+        showToast("Feeding updated")
+    }
+
+    fun deleteFeeding(id: Long) {
+        repository.deleteFeeding(id)
+        patchHistory { d -> d.copy(feedings = d.feedings.filterNot { it.id == id }) }
+        showToast("Feeding deleted")
+    }
+
+    fun updateDiaper(diaper: DiaperEvent) {
+        repository.updateDiaper(diaper)
+        patchHistory { d -> d.copy(diapers = d.diapers.map { if (it.id == diaper.id) diaper else it }) }
+        showToast("Diaper change updated")
+    }
+
+    fun updateTummyTime(tummyTime: TummyTimeEvent) {
+        repository.updateTummyTime(tummyTime)
+        patchHistory { d -> d.copy(tummyTimes = d.tummyTimes.map { if (it.id == tummyTime.id) tummyTime else it }) }
+        showToast("Tummy time updated")
+    }
+
+    fun deleteTummyTime(id: Long) {
+        repository.deleteTummyTime(id)
+        patchHistory { d -> d.copy(tummyTimes = d.tummyTimes.filterNot { it.id == id }) }
+        showToast("Tummy time deleted")
+    }
+
+    fun deleteDiaper(id: Long) {
+        repository.deleteDiaper(id)
+        patchHistory { d -> d.copy(diapers = d.diapers.filterNot { it.id == id }) }
+        showToast("Diaper change deleted")
+    }
+
+    fun showToast(message: String, isSuccess: Boolean = true, undo: (() -> Unit)? = null) {
+        val notification = UiNotification(message, isSuccess, undo = undo)
+        _notification.value = notification
+        viewModelScope.launch {
+            delay(if (undo != null) 5000 else 3000) // longer when there's something to undo
+            if (_notification.value === notification) {
+                _notification.value = null
+            }
+        }
+    }
+
+    fun runUndo() {
+        val undo = _notification.value?.undo ?: return
+        _notification.value = null
+        undo()
+        showToast("Undone")
+    }
+
+    fun dismissToast() {
+        _notification.value = null
+    }
+
+    // Timer controls
+
+    /** Left/Right button: start, switch to, or pause that side. Saved and synced on every tap. */
+    fun tapSide(side: BreastSide) {
+        repository.tapSide(side)
+    }
+
+    fun setSideSeconds(side: BreastSide, seconds: Int) {
+        repository.setSideSeconds(side, seconds)
+        showToast("${if (side == BreastSide.LEFT) "Left" else "Right"} side set to %02d:%02d".format(seconds / 60, seconds % 60))
+    }
+
+    fun setFeedStart(millis: Long) {
+        repository.setFeedStart(millis)
+        showToast("Feed start set to ${TimeFormat.clock(repository.liveTimerState.value.sessionStartMillis)}")
+    }
+
+    // Sleep
+    fun startSleep() {
+        repository.startSleep()
+        showToast("Sleep started")
+    }
+
+    fun setSleepStart(millis: Long) = repository.setSleepStart(millis)
+
+    fun setSleepNotes(notes: String) = repository.setSleepNotes(notes)
+
+    fun stopSleep(isNap: Boolean) {
+        val start = sleepTimer.value.startMillis
+        val id = repository.stopSleep(isNap = isNap) ?: return
+        val minutes = ((System.currentTimeMillis() - start) / 60_000L).toInt()
+        showToast("${if (isNap) "Nap" else "Sleep"} saved: ${formatMinutes(minutes)}", undo = { repository.deleteSleep(id) })
+    }
+
+    fun cancelSleep() {
+        repository.cancelSleep()
+        showToast("Sleep timer discarded")
+    }
+
+    fun logSleep(startMillis: Long, endMillis: Long, isNap: Boolean, notes: String) {
+        val id = repository.logSleep(startMillis, endMillis, isNap, notes)
+        showToast(
+            "${if (isNap) "Nap" else "Sleep"} logged: ${formatMinutes(((endMillis - startMillis) / 60_000L).toInt())}",
+            undo = { repository.deleteSleep(id) }
+        )
+    }
+
+    fun updateSleep(sleep: SleepEvent) {
+        repository.updateSleep(sleep)
+        patchHistory { d -> d.copy(sleeps = d.sleeps.map { if (it.id == sleep.id) sleep else it }) }
+        showToast("Sleep updated")
+    }
+
+    fun deleteSleep(id: Long) {
+        repository.deleteSleep(id)
+        patchHistory { d -> d.copy(sleeps = d.sleeps.filterNot { it.id == id }) }
+        showToast("Sleep deleted")
+    }
+
+    fun endFeed() {
+        repository.endFeed()
+        showToast("Feed ended")
+    }
+
+    fun switchSide() {
+        repository.switchActiveSide()
+    }
+
+    fun togglePauseTimer() {
+        repository.togglePause()
+    }
+
+    fun toggleChime() {
+        repository.toggleChime()
+        val active = liveTimerState.value.softChimeEnabled
+        showToast(if (active) "Soft Chime: On" else "Soft Chime: Muted")
+    }
+
+    fun toggleObservationTag(tag: String) {
+        repository.toggleObservation(tag)
+    }
+
+    fun startNewNursing(side: BreastSide = BreastSide.RIGHT) {
+        repository.startNewNursingSession(side)
+    }
+
+    fun finishAndSaveNursing(
+        supplementOz: Double = 0.0,
+        supplementType: String = "Pumped Breast Milk",
+        notes: String = ""
+    ) {
+        repository.finishAndSaveNursingSession(supplementOz, supplementType, notes)
+        showToast("Feeding saved")
+        navigateTo(ScreenDestination.TODAY_DASHBOARD)
+    }
+
+    fun saveDiaperChange(
+        type: DiaperType,
+        amount: String,
+        consistency: String,
+        color: String,
+        rashPresent: Boolean,
+        skinBarriers: List<String>,
+        timeMillis: Long?, // null = now
+        notes: String,
+        startNursingAfter: Boolean = false
+    ) {
+        val event = DiaperEvent(
+            timeFormatted = "",
+            type = type,
+            amount = amount,
+            consistency = consistency,
+            color = color,
+            rashPresent = rashPresent,
+            skinBarrierApplied = skinBarriers,
+            notes = notes
+        )
+        val id = repository.addDiaperLog(event, timeMillis ?: System.currentTimeMillis())
+
+        if (startNursingAfter) {
+            showToast("Diaper saved! Starting nursing timer...")
+            navigateTo(ScreenDestination.ACTIVE_NURSING_TIMER)
+        } else {
+            showToast("Diaper saved", undo = { repository.deleteDiaper(id) })
+            navigateTo(ScreenDestination.TODAY_DASHBOARD)
+        }
+    }
+
+    fun quickLog(category: String, amount: String? = null, note: String? = null) {
+        val id = repository.addQuickLog(category, amount, note) ?: return
+        val isBottle = category.equals("bottle", ignoreCase = true)
+        showToast(
+            if (isBottle) "Bottle logged" else "${category.replaceFirstChar { it.uppercase() }} diaper logged",
+            undo = { if (isBottle) repository.deleteFeeding(id) else repository.deleteDiaper(id) }
+        )
+    }
+
+    fun testBackendConnection(url: String, token: String, allowSelfSigned: Boolean, cfClientId: String, cfClientSecret: String) {
+        viewModelScope.launch {
+            showToast("Connecting to Baby Buddy...", isSuccess = true)
+            val result = repository.testConnection(url, token, allowSelfSigned, cfClientId, cfClientSecret)
+            if (result.isSuccess) {
+                showToast(result.getOrDefault("Connected successfully!"))
+                navigateTo(ScreenDestination.TODAY_DASHBOARD)
+                refresh()
+            } else {
+                showToast("Connection failed: ${result.exceptionOrNull()?.localizedMessage}", isSuccess = false)
+            }
+        }
+    }
+
+    fun disconnectServer() {
+        repository.disconnect()
+        navigateTo(ScreenDestination.TODAY_DASHBOARD) // the login screen shows until reconnected
+        showToast("Logged out")
+    }
+
+    fun enterDemoMode() {
+        repository.enterDemoMode()
+        navigateTo(ScreenDestination.TODAY_DASHBOARD)
+        showToast("Demo mode active with sample data")
+    }
+
+    fun toggleServerDisconnectedSimulation(disconnected: Boolean) {
+        repository.toggleServerDisconnectedView(disconnected)
+        if (disconnected) {
+            showToast("Simulating disconnected state", isSuccess = false)
+        } else {
+            showToast("Server connected")
+        }
+    }
+
+    // Widget Management Operations
+    fun setAddWidgetModalVisible(visible: Boolean) {
+        _showAddWidgetModal.value = visible
+    }
+
+    fun toggleDashboardWidget(type: DashboardWidgetType) {
+        repository.toggleWidget(type)
+        val isNowEnabled = repository.dashboardWidgets.value.find { it.type == type }?.isEnabled == true
+        if (isNowEnabled) {
+            showToast("${type.displayName} added to Today")
+        } else {
+            showToast("${type.displayName} removed from Today")
+        }
+    }
+
+    fun addDashboardWidget(type: DashboardWidgetType) {
+        repository.addWidget(type)
+        showToast("${type.displayName} added to Today")
+    }
+
+    fun removeDashboardWidget(type: DashboardWidgetType) {
+        repository.removeWidget(type)
+        showToast("Removed ${type.displayName}")
+    }
+
+    fun addTummyTimeMinutes(minutes: Int) {
+        val id = repository.addTummyTimeMinutes(minutes)
+        showToast("Tummy time logged: $minutes min", undo = { repository.deleteTummyTime(id) })
+    }
+
+    fun logTemperature(value: Double, notes: String = "") {
+        val id = repository.logTemperature(value, notes)
+        showToast("Temperature logged: ${"%.1f".format(value)}°", undo = { repository.deleteTemperature(id) })
+    }
+
+    /** Logs the measurements taken together (any of weight, length, head) as one entry each. */
+    fun logGrowth(values: Map<GrowthKind, Double>, dateMillis: Long?, notes: String = "") {
+        if (values.isEmpty()) return
+        val ids = values.map { (kind, value) -> repository.logGrowth(kind, value, dateMillis ?: System.currentTimeMillis(), notes) }
+        val text = values.entries.joinToString(", ") { (kind, value) -> formatGrowth(kind, value) }
+        showToast("Growth logged: $text", undo = { ids.forEach(repository::deleteGrowth) })
+    }
+
+    // Baths (notes tagged "bath")
+    val lastBathMillis: StateFlow<Long?> = repository.lastBathMillis
+
+    fun logBath(timeMillis: Long?, notes: String) {
+        val id = repository.logBath(timeMillis ?: System.currentTimeMillis(), notes)
+        showToast("Bath logged", undo = { repository.deleteNote(id) })
+    }
+
+    /** Saves a changed note or bath from History. */
+    fun updateNote(note: NoteEvent) {
+        repository.updateNote(note)
+        patchHistory { d ->
+            d.copy(
+                baths = d.baths.map { if (it.id == note.id) note else it },
+                notes = d.notes.map { if (it.id == note.id) note else it }
+            )
+        }
+        showToast(if (BATH_TAG in note.tags) "Bath updated" else "Note updated")
+    }
+
+    fun deleteNoteEntry(note: NoteEvent) {
+        repository.deleteNoteEvent(note)
+        patchHistory { d -> d.copy(baths = d.baths.filterNot { it.id == note.id }, notes = d.notes.filterNot { it.id == note.id }) }
+        showToast(if (BATH_TAG in note.tags) "Bath deleted" else "Note deleted")
+    }
+
+    fun addNote(text: String, tags: List<String> = emptyList()) {
+        val id = repository.addNote(text, tags)
+        showToast(if (tags.isEmpty()) "Note added" else "${text.trim()} logged", undo = { repository.deleteNote(id) })
+    }
+
+    // Quick notes, milk stash, reminders
+    val noteTags: StateFlow<List<NoteTag>> = repository.noteTags
+    val milkStash: StateFlow<Int?> = repository.milkStash
+    val lastFeedMillis: StateFlow<Long?> = repository.lastFeedMillis
+    val lastSleepEndMillis: StateFlow<Long?> = repository.lastSleepEndMillis
+    val reminders: StateFlow<ReminderSettings> = repository.reminders
+    val hiddenItems: StateFlow<Set<TrackedItem>> = repository.hiddenItems
+    fun setItemTracked(item: TrackedItem, tracked: Boolean) = repository.setItemTracked(item, tracked)
+    fun setReminders(settings: ReminderSettings) = repository.setReminders(settings)
+
+    fun setMilkStash(ml: Int) {
+        val id = repository.setMilkStash(ml)
+        showToast("Milk stash set to $ml ml", undo = { repository.undoMilkStash(id) })
+    }
+
+    /** Picks up feeds/sleeps started or ended on other phones; called every few seconds while the app is open. */
+    fun pollTimers() {
+        viewModelScope.launch { repository.pollSharedTimers() }
+    }
+
+    fun pinHomeScreenWidget(context: Context, widgetType: String) {
+        val providerClass = when (widgetType) {
+            "QUICK_LOG" -> BabyBuddyQuickLogWidget::class.java
+            "TIMER" -> BabyBuddyTimerWidget::class.java
+            "SUMMARY" -> BabyBuddySummaryWidget::class.java
+            else -> BabyBuddyQuickLogWidget::class.java
+        }
+        val sent = WidgetManagerHelper.pinWidget(context, providerClass)
+        if (sent) {
+            showToast("Requesting to add widget to Home Screen...", isSuccess = true)
+        } else {
+            showToast("Widget added! You can also long-press your home screen to add.", isSuccess = true)
+        }
+    }
+}

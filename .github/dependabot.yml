@@ -1,0 +1,26 @@
+# Weekly pull requests for dependency updates. Related updates are grouped so there are few PRs to review.
+# Pre-commit hook versions aren't covered here; bump them with `pre-commit autoupdate`.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      androidx-compose:
+        patterns: ["androidx.compose*", "androidx.activity*", "androidx.lifecycle*"]
+      kotlin-and-build:
+        patterns: ["org.jetbrains.kotlin*", "com.android.*", "com.google.devtools.ksp*"]
+      networking:
+        patterns: ["com.squareup.*"]
+      test:
+        patterns: ["junit*", "org.robolectric*", "androidx.test*", "org.jetbrains.kotlinx:kotlinx-coroutines-test"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

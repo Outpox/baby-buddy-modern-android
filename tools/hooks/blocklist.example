@@ -1,0 +1,6 @@
+# Copy to tools/hooks/blocklist.local (gitignored) and list words that must never be committed:
+# your baby's and caregivers' names, family name, your server's address, email domain, ...
+# One per line, matched case-insensitively as whole words in added lines.
+BabyName
+CaregiverName
+my-server.example.com
