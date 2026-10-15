@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bathtub
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Kitchen
@@ -134,6 +135,7 @@ fun TodayDashboardScreen(
     notes: List<NoteEvent> = emptyList(),
     feedIntervals: FeedIntervalStats? = null,
     lastBreastfeed: FeedingEvent? = null,
+    lastDiaper: DiaperEvent? = null,
     quickActions: List<QuickAction> = QuickAction.DEFAULT,
     onQuickActionsChange: (List<QuickAction>) -> Unit = {},
     onLogPumping: (ml: Int, minutes: Int, notes: String, startMillis: Long) -> Unit = { _, _, _, _ -> },
@@ -336,24 +338,30 @@ fun TodayDashboardScreen(
                 }
             }
 
-            if (feedingShown || TrackedItem.DIAPERS !in hiddenItems) {
+            // Cards (Customize Today), side by side when both are on
+            fun cardOn(type: DashboardWidgetType) = dashboardWidgets.any { it.type == type && it.isEnabled }
+            val showLastFeed = feedingShown && cardOn(DashboardWidgetType.LAST_FEED)
+            val showLastDiaper = TrackedItem.DIAPERS !in hiddenItems && cardOn(DashboardWidgetType.LAST_DIAPER)
+            if (showLastFeed || showLastDiaper) {
                 item(key = "last_entries") {
                     Row(
                         modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        if (feedingShown) {
+                        if (showLastFeed) {
                             LastFeedCard(
                                 recentFeedings = visibleFeedings,
                                 lastBreastfeed = lastBreastfeed.takeIf { TrackedItem.BREASTFEEDING !in hiddenItems },
                                 onClick = { onOpenHistory(HistoryFilter.FEEDS) },
+                                onRemove = { onRemoveDashboardWidget(DashboardWidgetType.LAST_FEED) },
                                 modifier = Modifier.weight(1f).fillMaxHeight()
                             )
                         }
-                        if (TrackedItem.DIAPERS !in hiddenItems) {
+                        if (showLastDiaper) {
                             LastDiaperCard(
-                                recentDiapers = recentDiapers,
+                                lastDiaper = lastDiaper,
                                 onClick = { onOpenHistory(HistoryFilter.DIAPERS) },
+                                onRemove = { onRemoveDashboardWidget(DashboardWidgetType.LAST_DIAPER) },
                                 modifier = Modifier.weight(1f).fillMaxHeight()
                             )
                         }
@@ -419,11 +427,14 @@ fun TodayDashboardScreen(
             }
 
             dashboardWidgets.filter {
-                it.isEnabled && !(it.type == DashboardWidgetType.TUMMY_TIME_GOAL && TrackedItem.TUMMY_TIME in hiddenItems) &&
+                it.isEnabled && it.type !in LAST_ENTRY_CARDS && !(it.type == DashboardWidgetType.TUMMY_TIME_GOAL && TrackedItem.TUMMY_TIME in hiddenItems) &&
                     !(it.type == DashboardWidgetType.GROWTH && TrackedItem.GROWTH in hiddenItems)
             }.forEach { widget ->
                 item(key = "widget_${widget.type.name}") {
                     when (widget.type) {
+                        // Shown in the pair near the top
+                        DashboardWidgetType.LAST_FEED, DashboardWidgetType.LAST_DIAPER -> Unit
+
                         DashboardWidgetType.TUMMY_TIME_GOAL -> TummyTimeGoalWidgetCard(
                             goalMinutes = tummyTimeGoal.dailyGoalMinutes,
                             todayMinutes = recentTummyTimes.sumOf { it.durationMinutes },
@@ -544,11 +555,27 @@ private fun sinceLabel(elapsedMillis: Long): String {
     }
 }
 
-/** Tappable summary card for the "last …" pair at the top of Today. */
+private val LAST_ENTRY_CARDS = setOf(DashboardWidgetType.LAST_FEED, DashboardWidgetType.LAST_DIAPER)
+
+/** The current time, updated on each minute boundary (for "… ago" labels). */
+@Composable
+private fun rememberMinuteClock(): Long {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(60_000L - now % 60_000L)
+        }
+    }
+    return now
+}
+
+/** Tappable summary card for the "last …" pair at the top of Today, with a small remove button. */
 @Composable
 private fun LastEntryCard(
     label: String,
     onClick: () -> Unit,
+    onRemove: () -> Unit,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -560,7 +587,12 @@ private fun LastEntryCard(
         modifier = modifier
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, style = MaterialTheme.typography.labelLarge, color = OutlineColor)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.labelLarge, color = OutlineColor, modifier = Modifier.weight(1f))
+                IconButton(onClick = onRemove, modifier = Modifier.size(20.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Remove card", tint = OutlineColor, modifier = Modifier.size(14.dp))
+                }
+            }
             content()
         }
     }
@@ -571,6 +603,7 @@ private fun LastFeedCard(
     recentFeedings: List<FeedingEvent>,
     lastBreastfeed: FeedingEvent?,
     onClick: () -> Unit,
+    onRemove: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Today's last feed, else the last breastfeed from the server (e.g. last night's)
@@ -578,7 +611,7 @@ private fun LastFeedCard(
     val lastNursing = lastBreastfeed ?: recentFeedings.firstOrNull { it.type == FeedType.NURSING }
     val lastSide = lastNursing?.lastSide
 
-    LastEntryCard(label = "Last feed", onClick = onClick, modifier = modifier) {
+    LastEntryCard(label = "Last feed", onClick = onClick, onRemove = onRemove, modifier = modifier) {
         if (lastFeed == null) {
             Text("None yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             return@LastEntryCard
@@ -589,13 +622,7 @@ private fun LastFeedCard(
             fontWeight = FontWeight.Bold
         )
         // Time since the feed started, refreshed every minute
-        var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-        LaunchedEffect(lastFeed.id) {
-            while (true) {
-                now = System.currentTimeMillis()
-                delay(60_000L - now % 60_000L)
-            }
-        }
+        val now = rememberMinuteClock()
         Text(
             sinceLabel(now - lastFeed.timeMillis),
             style = MaterialTheme.typography.titleSmall,
@@ -629,14 +656,21 @@ private fun LastFeedCard(
 }
 
 @Composable
-private fun LastDiaperCard(recentDiapers: List<DiaperEvent>, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val diaper = recentDiapers.maxByOrNull { it.timeMillis }
-    LastEntryCard(label = "Last diaper", onClick = onClick, modifier = modifier) {
+private fun LastDiaperCard(lastDiaper: DiaperEvent?, onClick: () -> Unit, onRemove: () -> Unit, modifier: Modifier = Modifier) {
+    val diaper = lastDiaper
+    LastEntryCard(label = "Last diaper", onClick = onClick, onRemove = onRemove, modifier = modifier) {
         if (diaper == null) {
-            Text("None today", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("None yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             return@LastEntryCard
         }
-        Text(diaper.timeFormatted, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(dayAndTime(diaper.timeMillis, diaper.timeFormatted), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        val now = rememberMinuteClock()
+        Text(
+            sinceLabel(now - diaper.timeMillis),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = PrimaryColor
+        )
         Text(
             diaper.type.name.lowercase().replaceFirstChar { it.uppercase() },
             style = MaterialTheme.typography.bodySmall,

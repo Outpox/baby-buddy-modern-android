@@ -71,6 +71,7 @@ import com.example.data.model.QuickAction
 import com.example.data.model.SleepEvent
 import com.example.data.model.TimeFormat
 import com.example.data.model.TummyTimeEvent
+import com.example.data.model.dayAndTime
 import com.example.data.model.formatGrowth
 import com.example.data.model.formatMinutes
 import com.example.data.model.parseGrowth
@@ -404,7 +405,10 @@ fun SideDurationDialog(sideLabel: String, initialSeconds: Int, onDismiss: () -> 
     }
 }
 
-/** Pick a clock time; the result is the latest such moment that isn't in the future. */
+/**
+ * Pick a clock time; the result is the latest such moment that isn't in the future, or [resolve]'s
+ * (which places it on a given day) moved by the days the wheels went round midnight (00:00 back to 23:59 = the day before).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimePickDialog(
@@ -413,11 +417,20 @@ fun TimePickDialog(
     onDismiss: () -> Unit,
     onSave: (Long) -> Unit,
     note: String? = null,
-    resolve: (hour: Int, minute: Int) -> Long = { h, m -> TimeFormat.latestAt(h, m) }
+    resolve: ((hour: Int, minute: Int) -> Long)? = null
 ) {
     val cal = remember(initialMillis) { Calendar.getInstance().apply { timeInMillis = initialMillis } }
     var hour by remember { mutableIntStateOf(cal.get(Calendar.HOUR_OF_DAY)) }
     var minute by remember { mutableIntStateOf(cal.get(Calendar.MINUTE)) }
+    var dayShift by remember { mutableIntStateOf(0) }
+    fun result(): Long = if (resolve == null) {
+        TimeFormat.latestAt(hour, minute)
+    } else {
+        Calendar.getInstance().apply {
+            timeInMillis = resolve(hour, minute)
+            add(Calendar.DAY_OF_YEAR, dayShift)
+        }.timeInMillis
+    }
     DialogFrame(onDismiss = onDismiss) {
         DialogTitle(title)
         if (note != null) {
@@ -425,16 +438,29 @@ fun TimePickDialog(
             Text(note, style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
         }
         Spacer(Modifier.height(16.dp))
-        ClockTimeEntry(hour = hour, minute = minute, onChange = { h, m ->
+        ClockTimeEntry(hour = hour, minute = minute, onChange = { h, m, days ->
             hour = h
             minute = m
+            dayShift += days
         })
+        // Which day it lands on, once that isn't today
+        val picked = result()
+        val day = dayAndTime(picked, TimeFormat.clock(picked))
+        if (day != TimeFormat.clock(picked)) {
+            Text(
+                day,
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
         Spacer(Modifier.height(8.dp))
         CancelSaveRow(
             onCancel = onDismiss,
             onSave = {
-                val unchanged = hour == cal.get(Calendar.HOUR_OF_DAY) && minute == cal.get(Calendar.MINUTE)
-                onSave(if (unchanged) initialMillis else resolve(hour, minute))
+                val unchanged = hour == cal.get(Calendar.HOUR_OF_DAY) && minute == cal.get(Calendar.MINUTE) && dayShift == 0
+                onSave(if (unchanged) initialMillis else result())
             }
         )
     }
@@ -449,7 +475,7 @@ fun TimeField(
     modifier: Modifier = Modifier,
     valueText: String? = null,
     dialogNote: String? = null,
-    resolve: (hour: Int, minute: Int) -> Long = { h, m -> TimeFormat.latestAt(h, m) }
+    resolve: ((hour: Int, minute: Int) -> Long)? = null
 ) {
     var picking by remember { mutableStateOf(false) }
     if (picking) {
@@ -911,6 +937,7 @@ fun EditFeedingDialog(feeding: FeedingEvent, onDismiss: () -> Unit, onSave: (Fee
     var formula by remember { mutableStateOf(feeding.bottleFormula) }
     var leftSec by remember { mutableIntStateOf(feeding.leftDurationSec) }
     var rightSec by remember { mutableIntStateOf(feeding.rightDurationSec) }
+    var lastSide by remember { mutableStateOf(feeding.lastSide) }
     var notes by remember { mutableStateOf(feeding.notes) }
 
     DialogFrame(onDismiss = onDismiss) {
@@ -928,6 +955,17 @@ fun EditFeedingDialog(feeding: FeedingEvent, onDismiss: () -> Unit, onSave: (Fee
             SecondsField(label = "Left", seconds = leftSec, onChange = { leftSec = it })
             Spacer(Modifier.height(8.dp))
             SecondsField(label = "Right", seconds = rightSec, onChange = { rightSec = it })
+            Spacer(Modifier.height(16.dp))
+            SectionLabel("Last side")
+            SegmentedToggle(
+                options = listOf("Left", "Right"),
+                selectedIndex = when (lastSide) {
+                    BreastSide.LEFT -> 0
+                    BreastSide.RIGHT -> 1
+                    else -> -1
+                },
+                onSelect = { lastSide = if (it == 0) BreastSide.LEFT else BreastSide.RIGHT }
+            )
         }
 
         Spacer(Modifier.height(20.dp))
@@ -959,6 +997,7 @@ fun EditFeedingDialog(feeding: FeedingEvent, onDismiss: () -> Unit, onSave: (Fee
                         leftDurationSec = leftSec,
                         rightDurationSec = rightSec,
                         side = side,
+                        sides = sidesEndingOn(lastSide, leftSec, rightSec) ?: feeding.sides,
                         notes = notes.trim()
                     )
                 }
@@ -966,6 +1005,13 @@ fun EditFeedingDialog(feeding: FeedingEvent, onDismiss: () -> Unit, onSave: (Fee
             }
         )
     }
+}
+
+/** Side order ("LEFT -> RIGHT") for a breastfeed that ended on [last]; the other side comes first if it has time. */
+private fun sidesEndingOn(last: BreastSide?, leftSec: Int, rightSec: Int): String? = when (last) {
+    BreastSide.LEFT -> if (rightSec > 0) "RIGHT -> LEFT" else "LEFT"
+    BreastSide.RIGHT -> if (leftSec > 0) "LEFT -> RIGHT" else "RIGHT"
+    else -> null
 }
 
 /** Edit or delete a diaper change. */

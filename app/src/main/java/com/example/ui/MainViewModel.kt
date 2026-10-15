@@ -105,6 +105,7 @@ class MainViewModel(
     val tummyTimes: StateFlow<List<TummyTimeEvent>> = repository.tummyTimes
     val pumpings: StateFlow<List<PumpingEvent>> = repository.pumpings
     val lastBreastfeed: StateFlow<FeedingEvent?> = repository.lastBreastfeed
+    val lastDiaper: StateFlow<DiaperEvent?> = repository.lastDiaper
     val quickActions: StateFlow<List<QuickAction>> = repository.quickActions
     fun setQuickActions(actions: List<QuickAction>) = repository.setQuickActions(actions)
 

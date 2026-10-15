@@ -32,9 +32,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,21 +55,31 @@ import kotlinx.coroutines.launch
 private val WHEEL_ROW_HEIGHT = 44.dp
 private const val WHEEL_VISIBLE_ROWS = 5
 
+// A cyclic wheel is this many laps of its values long, starting in the middle (far more than anyone scrolls)
+private const val WHEEL_LAPS = 1000
+
 /**
- * A vertical scroll wheel of [count] values that snaps to the middle row. [onSelected] gets the index
- * in the middle whenever it changes (including once at first show). Tapping a value scrolls to it.
+ * A vertical scroll wheel of [count] values that snaps to the middle row and shows [value].
+ * [onSelected] gets the index in the middle whenever it changes (including once at first show), plus how
+ * many times a [cyclic] wheel went round since the last call: +1 when scrolling past the last value back
+ * to the first (59 → 00), -1 the other way (00 → 59). Changing [value] from outside (e.g. the hour after
+ * the minutes went round) scrolls the wheel there without reporting a lap. Tapping a value scrolls to it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WheelPicker(
     count: Int,
-    initialIndex: Int,
+    value: Int,
     label: (Int) -> String,
-    onSelected: (Int) -> Unit,
+    onSelected: (index: Int, laps: Int) -> Unit,
     modifier: Modifier = Modifier,
-    width: Dp = 64.dp
+    width: Dp = 64.dp,
+    cyclic: Boolean = false
 ) {
-    val state = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex.coerceIn(0, (count - 1).coerceAtLeast(0)))
+    val last = (count - 1).coerceAtLeast(0)
+    val total = if (cyclic) count * WHEEL_LAPS else count
+    val base = if (cyclic) count * (WHEEL_LAPS / 2) else 0
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = base + value.coerceIn(0, last))
     val fling = rememberSnapFlingBehavior(lazyListState = state)
     val scope = rememberCoroutineScope()
     val rowPx = with(LocalDensity.current) { WHEEL_ROW_HEIGHT.toPx() }
@@ -74,11 +87,36 @@ fun WheelPicker(
     val centered by remember(count) {
         derivedStateOf {
             val offsetRows = if (state.firstVisibleItemScrollOffset > rowPx / 2) 1 else 0
-            (state.firstVisibleItemIndex + offsetRows).coerceIn(0, (count - 1).coerceAtLeast(0))
+            (state.firstVisibleItemIndex + offsetRows).coerceIn(0, (total - 1).coerceAtLeast(0))
         }
     }
+    // The row last reported (laps are counted from it) and whether we're scrolling to an outside value
+    var reported by remember { mutableIntStateOf(centered) }
+    var following by remember { mutableStateOf(false) }
     val latestOnSelected by rememberUpdatedState(onSelected)
-    LaunchedEffect(centered) { latestOnSelected(centered) }
+    LaunchedEffect(centered) {
+        if (following || count == 0) return@LaunchedEffect
+        val laps = Math.floorDiv(centered, count) - Math.floorDiv(reported, count)
+        reported = centered
+        latestOnSelected(centered % count, laps)
+    }
+    LaunchedEffect(value, count) {
+        if (count == 0 || state.isScrollInProgress || value.coerceIn(0, last) == centered % count) return@LaunchedEffect
+        // The nearest row showing the new value (across a lap boundary on a cyclic wheel)
+        val target = if (cyclic) {
+            val diff = Math.floorMod(value - centered % count, count)
+            centered + if (diff > count / 2) diff - count else diff
+        } else {
+            value.coerceIn(0, last)
+        }
+        following = true
+        try {
+            state.animateScrollToItem(target)
+        } finally {
+            reported = target
+            following = false
+        }
+    }
 
     Box(
         modifier = modifier
@@ -101,17 +139,17 @@ fun WheelPicker(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxSize()
         ) {
-            items(count) { index ->
-                val selected = index == centered
+            items(total) { row ->
+                val selected = row == centered
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(WHEEL_ROW_HEIGHT)
-                        .clickable { scope.launch { state.animateScrollToItem(index) } },
+                        .clickable { scope.launch { state.animateScrollToItem(row) } },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        label(index),
+                        label(row % count),
                         style = if (selected) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         color = if (selected) PrimaryColor else OnSurfaceVariant.copy(alpha = 0.6f)
@@ -151,39 +189,61 @@ fun InputModeToggle(modifier: Modifier = Modifier) {
     }
 }
 
-/** A clock time (24h or 12h per Settings) as wheels or the keyboard field, with a switch between them. */
+/**
+ * A clock time (24h or 12h per Settings) as wheels or the keyboard field, with a switch between them.
+ * The wheels go round: minutes past 59 or before 00 move the hour, and the hour past midnight moves the
+ * day; [onChange] gets that as [dayShift] (-1 for 00:00 → 23:59, +1 for 23:59 → 00:00).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ClockTimeEntry(hour: Int, minute: Int, onChange: (hour: Int, minute: Int) -> Unit, modifier: Modifier = Modifier) {
+fun ClockTimeEntry(hour: Int, minute: Int, onChange: (hour: Int, minute: Int, dayShift: Int) -> Unit, modifier: Modifier = Modifier) {
+    // Moves the time by whole hours, carrying past midnight into the day
+    fun setTime(newMinute: Int, hourSteps: Int, baseHour: Int = hour) {
+        val h = baseHour + hourSteps
+        onChange(Math.floorMod(h, 24), newMinute, Math.floorDiv(h, 24))
+    }
     Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         if (TimeFormat.useWheel) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                 if (TimeFormat.use24h) {
-                    WheelPicker(count = 24, initialIndex = hour, label = { "%02d".format(it) }, onSelected = { onChange(it, minute) })
+                    WheelPicker(
+                        count = 24,
+                        value = hour,
+                        label = { "%02d".format(it) },
+                        onSelected = { h, laps -> setTime(minute, laps * 24, baseHour = h) },
+                        cyclic = true
+                    )
                 } else {
-                    // 12, 1 … 11 and AM/PM
+                    // 12, 1 … 11 and AM/PM; going round from 11 to 12 flips AM/PM (and past midnight, the day)
                     WheelPicker(
                         count = 12,
-                        initialIndex = hour % 12,
+                        value = hour % 12,
                         label = { if (it == 0) "12" else "$it" },
-                        onSelected = { onChange(it + if (hour >= 12) 12 else 0, minute) }
+                        onSelected = { h, laps -> setTime(minute, laps * 12, baseHour = h + if (hour >= 12) 12 else 0) },
+                        cyclic = true
                     )
                 }
                 WheelSeparator(":")
-                WheelPicker(count = 60, initialIndex = minute, label = { "%02d".format(it) }, onSelected = { onChange(hour, it) })
+                WheelPicker(
+                    count = 60,
+                    value = minute,
+                    label = { "%02d".format(it) },
+                    onSelected = { m, laps -> setTime(m, laps) },
+                    cyclic = true
+                )
                 if (!TimeFormat.use24h) {
                     WheelPicker(
                         count = 2,
-                        initialIndex = if (hour >= 12) 1 else 0,
+                        value = if (hour >= 12) 1 else 0,
                         label = { if (it == 0) "AM" else "PM" },
-                        onSelected = { onChange(hour % 12 + it * 12, minute) },
+                        onSelected = { half, _ -> onChange(hour % 12 + half * 12, minute, 0) },
                         modifier = Modifier.padding(start = 8.dp)
                     )
                 }
             }
         } else {
             val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = TimeFormat.use24h)
-            LaunchedEffect(state.hour, state.minute) { onChange(state.hour, state.minute) }
+            LaunchedEffect(state.hour, state.minute) { onChange(state.hour, state.minute, 0) }
             TimeInput(state = state)
         }
         InputModeToggle()
@@ -192,7 +252,8 @@ fun ClockTimeEntry(hour: Int, minute: Int, onChange: (hour: Int, minute: Int) ->
 
 /**
  * A duration as two wheels ([firstLabel] / [secondLabel], e.g. minutes : seconds or hours : minutes).
- * [firstMax] is the largest first value offered.
+ * [firstMax] is the largest first value offered. The second wheel goes round, carrying into the first
+ * (1:00 back to 0:59), which stays between 0 and [firstMax].
  */
 @Composable
 fun DurationWheels(
@@ -203,15 +264,32 @@ fun DurationWheels(
     secondUnit: String,
     onChange: (first: Int, second: Int) -> Unit
 ) {
+    val firstCount = maxOf(firstMax, first) + 1
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         WheelPicker(
-            count = maxOf(firstMax, first) + 1,
-            initialIndex = first,
+            count = firstCount,
+            value = first,
             label = { "$it" },
-            onSelected = { onChange(it, second) }
+            onSelected = { f, _ -> onChange(f, second) }
         )
         WheelSeparator(firstUnit)
-        WheelPicker(count = 60, initialIndex = second, label = { "%02d".format(it) }, onSelected = { onChange(first, it) })
+        WheelPicker(
+            count = 60,
+            value = second,
+            label = { "%02d".format(it) },
+            onSelected = { s, laps ->
+                val f = first + laps
+                when {
+                    f < 0 -> onChange(0, 0)
+
+                    // nothing below zero
+                    f >= firstCount -> onChange(firstCount - 1, 59)
+
+                    else -> onChange(f, s)
+                }
+            },
+            cyclic = true
+        )
         WheelSeparator(secondUnit)
     }
 }

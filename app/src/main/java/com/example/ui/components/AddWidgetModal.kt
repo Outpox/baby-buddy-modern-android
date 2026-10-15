@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.WaterDrop
@@ -743,6 +744,8 @@ private fun MiniSummaryBox(
 }
 
 private fun getWidgetIcon(type: DashboardWidgetType): ImageVector = when (type) {
+    DashboardWidgetType.LAST_FEED -> Icons.Default.Restaurant
+    DashboardWidgetType.LAST_DIAPER -> Icons.Default.WaterDrop
     DashboardWidgetType.TUMMY_TIME_GOAL -> Icons.Default.FitnessCenter
     DashboardWidgetType.HEALTH_VITALS -> Icons.Default.Thermostat
     DashboardWidgetType.CAREGIVER_NOTES -> Icons.Default.NoteAlt
@@ -750,6 +753,8 @@ private fun getWidgetIcon(type: DashboardWidgetType): ImageVector = when (type) 
 }
 
 private fun getWidgetAccent(type: DashboardWidgetType): Color = when (type) {
+    DashboardWidgetType.LAST_FEED -> ItemColors.tint(TrackedItem.BREASTFEEDING)
+    DashboardWidgetType.LAST_DIAPER -> ItemColors.tint(TrackedItem.DIAPERS)
     DashboardWidgetType.TUMMY_TIME_GOAL -> ItemColors.tint(TrackedItem.TUMMY_TIME)
     DashboardWidgetType.HEALTH_VITALS -> PrimaryColor
     DashboardWidgetType.CAREGIVER_NOTES -> ItemColors.tint(TrackedItem.QUICK_NOTES)
@@ -757,6 +762,8 @@ private fun getWidgetAccent(type: DashboardWidgetType): Color = when (type) {
 }
 
 private fun getWidgetDescription(type: DashboardWidgetType): String = when (type) {
+    DashboardWidgetType.LAST_FEED -> "When the last feed started, how long ago, and the last side."
+    DashboardWidgetType.LAST_DIAPER -> "When the last diaper change was, how long ago, and its type."
     DashboardWidgetType.TUMMY_TIME_GOAL -> "Log tummy time towards a daily goal."
     DashboardWidgetType.HEALTH_VITALS -> "Log and see temperature readings."
     DashboardWidgetType.CAREGIVER_NOTES -> "Shared notes like baths and routines."

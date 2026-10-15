@@ -185,6 +185,7 @@ fun BabyBuddyApp(
     val historyIsCurrentWeek by viewModel.historyIsCurrentWeek.collectAsState()
     val historyFilter by viewModel.historyFilter.collectAsState()
     val lastBreastfeed by viewModel.lastBreastfeed.collectAsState()
+    val lastDiaper by viewModel.lastDiaper.collectAsState()
     val quickActions by viewModel.quickActions.collectAsState()
 
     // Widgets state
@@ -281,6 +282,7 @@ fun BabyBuddyApp(
                         notes = notes,
                         feedIntervals = feedIntervals,
                         lastBreastfeed = lastBreastfeed,
+                        lastDiaper = lastDiaper,
                         quickActions = quickActions,
                         onQuickActionsChange = { viewModel.setQuickActions(it) },
                         onLogPumping = { ml, minutes, notes, start -> viewModel.logPumping(ml, minutes, notes, start) },

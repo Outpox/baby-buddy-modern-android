@@ -235,6 +235,8 @@ enum class QuickAction(val label: String) {
 }
 
 enum class DashboardWidgetType(val displayName: String, val category: String) {
+    LAST_FEED("Last feed", "Feeding"),
+    LAST_DIAPER("Last diaper", "Diapers"),
     TUMMY_TIME_GOAL("Tummy time", "Activity"),
     HEALTH_VITALS("Temperature", "Health"),
     CAREGIVER_NOTES("Notes", "Family"),

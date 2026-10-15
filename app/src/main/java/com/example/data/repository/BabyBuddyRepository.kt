@@ -135,6 +135,16 @@ class BabyBuddyRepository {
         }.stateIn(syncScope, SharingStarted.Eagerly, null)
     }
 
+    // The latest diaper change on the server, so "last diaper" still shows before today's first change
+    private val _lastDiaperRemote = MutableStateFlow<DiaperEvent?>(null)
+
+    /** The most recent diaper change (today's if any, else the latest on the server). */
+    val lastDiaper: StateFlow<DiaperEvent?> by lazy {
+        combine(_diapers, _lastDiaperRemote) { today, remote ->
+            today.maxByOrNull { it.timeMillis }?.takeIf { remote == null || it.timeMillis >= remote.timeMillis } ?: remote
+        }.stateIn(syncScope, SharingStarted.Eagerly, null)
+    }
+
     /** Today's sleeps (including one that started last night and ended today). */
     // Newest feed of any kind and newest sleep end on the server (may be yesterday's), for reminders and "awake for"
     private val _lastFeedRemote = MutableStateFlow<Long?>(null)
@@ -260,6 +270,7 @@ class BabyBuddyRepository {
         _notes.update { list -> list.map { it.copy(timeFormatted = formatClock(it.timeMillis)) } }
         _sleeps.update { list -> list.map { it.copy(timeFormatted = formatClock(it.timeMillis)) } }
         _lastBreastfeedRemote.update { it?.copy(timeFormatted = formatClock(it.timeMillis)) }
+        _lastDiaperRemote.update { it?.copy(timeFormatted = formatClock(it.timeMillis)) }
         _liveTimerState.update { t ->
             if (t.isRunning && t.sessionStartMillis > 0) t.copy(sessionStartedTime = formatClock(t.sessionStartMillis)) else t
         }
@@ -459,6 +470,7 @@ class BabyBuddyRepository {
 
         _lastBreastfeedRemote.value = _feedings.value.firstOrNull { it.type == FeedType.NURSING }
         _lastFeedRemote.value = _feedings.value.firstOrNull()?.timeMillis
+        _lastDiaperRemote.value = allDemoDiapers.firstOrNull()
         _lastSleepEndRemote.value = _sleeps.value.firstOrNull()?.timeMillis
         _lastBathRemote.value = _notes.value.firstOrNull { BATH_TAG in it.tags }?.timeMillis
         _stashBase.value = StashBase(450, System.currentTimeMillis(), 0, 0)
@@ -569,6 +581,11 @@ class BabyBuddyRepository {
             _lastBreastfeedRemote.value = recent.firstOrNull { it.type == FeedType.NURSING }
             _lastFeedRemote.value = recent.maxOfOrNull { it.timeMillis }
         }
+
+        runCatching {
+            // Newest first (may be from yesterday)
+            api.getChanges(authHeader, childId, limit = 1).body()!!.results.map(::mapChange).firstOrNull()
+        }.onSuccess { _lastDiaperRemote.value = it }
 
         runCatching {
             api.getSleep(authHeader, childId, limit = 5).body()!!.results.map(::mapSleep)
@@ -1207,6 +1224,7 @@ class BabyBuddyRepository {
         _pumpings.value = emptyList()
         _lastBreastfeedRemote.value = null
         _lastFeedRemote.value = null
+        _lastDiaperRemote.value = null
         _lastSleepEndRemote.value = null
         _lastBathRemote.value = null
         _noteTags.value = emptyList()
@@ -1428,12 +1446,14 @@ class BabyBuddyRepository {
 
     fun updateDiaper(updated: DiaperEvent) {
         _diapers.update { list -> list.map { if (it.id == updated.id) updated else it }.sortedByDescending { it.timeMillis } }
+        _lastDiaperRemote.update { if (it?.id == updated.id) updated else it }
         enqueue(QueuedWrite(ENDPOINT_CHANGES, QueuedWrite.ACTION_UPDATE, updated.id, knownServerId(updated.id, updated.serverId), changeBody(updated)))
     }
 
     fun deleteDiaper(id: Long) {
         val event = _diapers.value.firstOrNull { it.id == id } ?: return
         _diapers.update { list -> list.filterNot { it.id == id } }
+        _lastDiaperRemote.update { if (it?.id == id) null else it }
         enqueue(QueuedWrite(ENDPOINT_CHANGES, QueuedWrite.ACTION_DELETE, id, knownServerId(id, event.serverId)))
     }
 
@@ -1464,6 +1484,8 @@ class BabyBuddyRepository {
     fun updateFeeding(updated: FeedingEvent) {
         val event = updated
         _feedings.update { list -> list.map { if (it.id == event.id) event else it }.sortedByDescending { it.timeMillis } }
+        // An older feed edited from History may be the "last breastfeed" (its last side drives Today and the widget)
+        _lastBreastfeedRemote.update { if (it?.id == event.id) event else it }
         enqueue(QueuedWrite(ENDPOINT_FEEDINGS, QueuedWrite.ACTION_UPDATE, event.id, knownServerId(event.id, event.serverId), feedingBody(event)))
     }
 
@@ -2466,7 +2488,12 @@ class BabyBuddyRepository {
             .mapNotNull { name -> TrackedItem.entries.firstOrNull { it.name == name } }.toSet()
         p.getString(PREF_DASHBOARD_WIDGETS, null)?.let { saved ->
             val enabled = saved.split(",").map { if (it == "WEIGHT") "GROWTH" else it }.toSet()
-            _dashboardWidgets.update { list -> list.map { it.copy(isEnabled = it.type.name in enabled) } }
+            // Cards added since the choice was saved keep their default (saves from before this list knew only these four)
+            val known = p.getString(PREF_DASHBOARD_WIDGETS_KNOWN, null)?.split(",")?.toSet()
+                ?: setOf("TUMMY_TIME_GOAL", "HEALTH_VITALS", "CAREGIVER_NOTES", "GROWTH")
+            _dashboardWidgets.update { list ->
+                list.map { if (it.type.name in known) it.copy(isEnabled = it.type.name in enabled) else it }
+            }
         }
         startTimerPushers()
         startTimerTicker()
@@ -2670,6 +2697,8 @@ class BabyBuddyRepository {
 
     companion object {
         fun defaultDashboardWidgets() = listOf(
+            DashboardWidgetConfig(DashboardWidgetType.LAST_FEED, "Last feed", "Time since, side", isEnabled = true),
+            DashboardWidgetConfig(DashboardWidgetType.LAST_DIAPER, "Last diaper", "Time since, type", isEnabled = true),
             DashboardWidgetConfig(DashboardWidgetType.TUMMY_TIME_GOAL, "Tummy time", "Daily goal", isEnabled = false),
             DashboardWidgetConfig(DashboardWidgetType.HEALTH_VITALS, "Temperature", "Readings", isEnabled = false),
             DashboardWidgetConfig(DashboardWidgetType.CAREGIVER_NOTES, "Notes", "Shared notes", isEnabled = false),
@@ -2691,6 +2720,7 @@ class BabyBuddyRepository {
         private val GROWTH_ENDPOINTS = GrowthKind.entries.map { it.endpoint }.toSet()
         private const val PREF_BABY_SEX = "baby_sex"
         private const val PREF_DASHBOARD_WIDGETS = "dashboard_widgets"
+        private const val PREF_DASHBOARD_WIDGETS_KNOWN = "dashboard_widgets_known"
         private const val ENDPOINT_TIMERS = "timers"
         private const val PREF_SLEEP_CHANGED = "sleep_timer_changed_at"
         private const val PREF_FEED_TIMER_ID = "feed_timer_remote_id"
@@ -2750,7 +2780,8 @@ class BabyBuddyRepository {
 
     private fun saveDashboardWidgets() {
         val enabled = _dashboardWidgets.value.filter { it.isEnabled }.joinToString(",") { it.type.name }
-        prefs?.edit()?.putString(PREF_DASHBOARD_WIDGETS, enabled)?.apply()
+        prefs?.edit()?.putString(PREF_DASHBOARD_WIDGETS, enabled)
+            ?.putString(PREF_DASHBOARD_WIDGETS_KNOWN, DashboardWidgetType.entries.joinToString(",") { it.name })?.apply()
     }
 
     /** Logs a tummy-time session that just ended; returns its id (for undo). */
