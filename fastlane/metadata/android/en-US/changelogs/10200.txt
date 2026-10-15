@@ -1,0 +1,5 @@
+- Last feed and Last diaper are cards at the top of Today showing how long ago; remove them or turn them back on in Customize Today
+- Last diaper falls back to yesterday's change instead of "None today"
+- Time wheels wrap around and carry into the next wheel; going back past midnight moves the entry to the day before
+- Entries rejected by a proxy's error page (Cloudflare, nginx) are retried instead of dropped
+- Updated libraries

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & test
 
-The Gradle wrapper (Gradle 9.6.0; AGP 9.4, Kotlin 2.4, compileSdk 37, targetSdk 36) is checked in:
+The Gradle wrapper (Gradle 9.8.1; AGP 9.4, Kotlin 2.4, compileSdk 37, targetSdk 36) is checked in:
 
 ```bash
 ./gradlew :app:assembleDebug                 # build debug APK
