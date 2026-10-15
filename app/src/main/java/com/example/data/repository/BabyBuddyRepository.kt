@@ -2231,7 +2231,7 @@ class BabyBuddyRepository {
         }
     }
 
-    private enum class WriteResult { SAVED, REJECTED, RETRY, NEEDS_LOGIN }
+    private enum class WriteResult { SAVED, REJECTED, RETRY, PROXY_RETRY, NEEDS_LOGIN }
 
     /** Sends queued writes in order. A write that fails on network/server errors blocks the queue and is retried with backoff. */
     private fun flushPendingWrites() {
@@ -2243,10 +2243,10 @@ class BabyBuddyRepository {
                 val auth = remoteAuthHeader
                 val write = synchronized(pendingWrites) { pendingWrites.firstOrNull() } ?: break
 
-                when (attemptWrite(write, api, auth, child)) {
+                when (val result = attemptWrite(write, api, auth, child)) {
                     WriteResult.SAVED, WriteResult.REJECTED -> removeHead(write)
 
-                    WriteResult.RETRY -> {
+                    WriteResult.RETRY, WriteResult.PROXY_RETRY -> {
                         val attempts = write.attempts + 1
                         synchronized(pendingWrites) {
                             if (pendingWrites.firstOrNull() == write) {
@@ -2254,7 +2254,11 @@ class BabyBuddyRepository {
                                 queueChanged()
                             }
                         }
-                        if (attempts == 1) _syncErrors.tryEmit("Couldn't reach server, will keep retrying")
+                        if (attempts == 1) {
+                            _syncErrors.tryEmit(
+                                if (result == WriteResult.PROXY_RETRY) "A proxy in front of the server rejected ${describe(write)}, will retry" else "Couldn't reach server, will keep retrying"
+                            )
+                        }
                         // 5s, 10s, 20s ... capped at 5 min
                         delay(minOf(5_000L shl minOf(attempts - 1, 6), 300_000L))
                     }
@@ -2316,12 +2320,21 @@ class BabyBuddyRepository {
         response.code() == 408 || response.code() == 429 || response.code() >= 500 -> WriteResult.RETRY
 
         else -> {
-            // Validation errors won't fix themselves on retry
-            val detail = response.errorBody()?.string()?.take(160).orEmpty()
-            _syncErrors.tryEmit("Server rejected ${describe(write)} (HTTP ${response.code()}) $detail".trim())
-            WriteResult.REJECTED
+            val detail = response.errorBody()?.string().orEmpty()
+            if (!isApiReply(response, detail) && write.attempts + 1 < PROXY_RETRY_ATTEMPTS) {
+                // An HTML error page comes from a proxy in front of Baby Buddy (Cloudflare, nginx…), not from the
+                // server's validation, so the request may well go through next time
+                WriteResult.PROXY_RETRY
+            } else {
+                // Validation errors won't fix themselves on retry
+                _syncErrors.tryEmit("Server rejected ${describe(write)} (HTTP ${response.code()}) ${detail.take(160)}".trim())
+                WriteResult.REJECTED
+            }
         }
     }
+
+    /** Baby Buddy's API answers errors in JSON; anything else was made by something in between. */
+    private fun isApiReply(response: Response<*>, body: String): Boolean = response.errorBody()?.contentType()?.subtype == "json" || body.trimStart().let { it.startsWith("{") || it.startsWith("[") }
 
     @Suppress("UNCHECKED_CAST")
     private fun sendable(body: Map<String, Any?>): Map<String, Any> = body.filterValues { it != null } as Map<String, Any>
@@ -2722,6 +2735,7 @@ class BabyBuddyRepository {
         private const val PREF_DASHBOARD_WIDGETS = "dashboard_widgets"
         private const val PREF_DASHBOARD_WIDGETS_KNOWN = "dashboard_widgets_known"
         private const val ENDPOINT_TIMERS = "timers"
+        private const val PROXY_RETRY_ATTEMPTS = 6 // ~2.5 min of backoff before a proxy's 4xx is treated as final
         private const val PREF_SLEEP_CHANGED = "sleep_timer_changed_at"
         private const val PREF_FEED_TIMER_ID = "feed_timer_remote_id"
         private const val PREF_SLEEP_TIMER_ID = "sleep_timer_remote_id"
