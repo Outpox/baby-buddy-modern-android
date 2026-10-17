@@ -64,6 +64,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.ml.RhythmTarget
 import com.example.data.model.BabySex
 import com.example.data.model.BreastSide
 import com.example.data.model.DashboardWidgetConfig
@@ -148,6 +149,7 @@ fun TodayDashboardScreen(
     lastFeedMillis: Long? = null,
     lastSleepEndMillis: Long? = null,
     reminders: ReminderSettings = ReminderSettings(),
+    modelNext: Map<RhythmTarget, Long> = emptyMap(), // picked rhythm models' next times (Trends → Models)
     hiddenItems: Set<TrackedItem> = emptySet(),
     lastBathMillis: Long? = null,
     onLogBath: (notes: String, timeMillis: Long?) -> Unit = { _, _ -> },
@@ -375,17 +377,24 @@ fun TodayDashboardScreen(
             val awakeSince = lastSleepEndMillis.takeIf {
                 !sleepTimer.isRunning && TrackedItem.SLEEP !in hiddenItems && it != null && it <= System.currentTimeMillis()
             }
-            val nextFeedAt = if (!feedingShown || liveTimerState.isRunning || lastFeedMillis == null || feedEvery == null) {
-                null
-            } else {
-                lastFeedMillis + feedEvery * 60_000L
-            }
-            if (awakeSince != null || nextFeedAt != null) {
+            val nextFeedAt = modelNext[RhythmTarget.FEED_GAP]
+                ?: if (!feedingShown || liveTimerState.isRunning || lastFeedMillis == null || feedEvery == null) {
+                    null
+                } else {
+                    lastFeedMillis + feedEvery * 60_000L
+                }
+            val otherNext = listOfNotNull(
+                modelNext[RhythmTarget.DIAPER_GAP]?.let { "Next diaper" to it },
+                modelNext[RhythmTarget.AWAKE_WINDOW]?.let { "Next sleep" to it },
+                modelNext[RhythmTarget.SLEEP_LENGTH]?.let { "Wake-up" to it }
+            )
+            if (awakeSince != null || nextFeedAt != null || otherNext.isNotEmpty()) {
                 item(key = "next_up") {
                     NextUpCard(
                         awakeSince = awakeSince,
                         nextFeedAt = nextFeedAt,
-                        onSleepClick = { onNavigate(ScreenDestination.SLEEP) }
+                        onSleepClick = { onNavigate(ScreenDestination.SLEEP) },
+                        modelNext = otherNext
                     )
                 }
             }
@@ -971,7 +980,7 @@ private fun TodaySummaryGrid(
 private fun sessions(count: Int) = if (count == 1) "1 session" else "$count sessions"
 
 @Composable
-private fun NextUpCard(awakeSince: Long?, nextFeedAt: Long?, onSleepClick: () -> Unit) {
+private fun NextUpCard(awakeSince: Long?, nextFeedAt: Long?, onSleepClick: () -> Unit, modelNext: List<Pair<String, Long>> = emptyList()) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -984,41 +993,56 @@ private fun NextUpCard(awakeSince: Long?, nextFeedAt: Long?, onSleepClick: () ->
         colors = CardDefaults.cardColors(containerColor = SurfaceContainerLow),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (awakeSince != null && awakeSince <= now) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable(onClick = onSleepClick)
-                ) {
-                    Text("Awake for", style = MaterialTheme.typography.labelLarge, color = OutlineColor)
-                    Text(
-                        formatMinutes(((now - awakeSince) / 60_000L).toInt()),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text("since ${TimeFormat.clock(awakeSince)}", style = MaterialTheme.typography.bodySmall, color = OutlineColor)
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if ((awakeSince != null && awakeSince <= now) || nextFeedAt != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (awakeSince != null && awakeSince <= now) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(onClick = onSleepClick)
+                        ) {
+                            Text("Awake for", style = MaterialTheme.typography.labelLarge, color = OutlineColor)
+                            Text(
+                                formatMinutes(((now - awakeSince) / 60_000L).toInt()),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text("since ${TimeFormat.clock(awakeSince)}", style = MaterialTheme.typography.bodySmall, color = OutlineColor)
+                        }
+                    }
+                    if (nextFeedAt != null) NextAt("Next feed", nextFeedAt, now, Modifier.weight(1f))
                 }
             }
-            if (nextFeedAt != null) {
-                val minutesLeft = ((nextFeedAt - now) / 60_000L).toInt()
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Next feed", style = MaterialTheme.typography.labelLarge, color = OutlineColor)
-                    Text(
-                        "~${TimeFormat.clock(nextFeedAt)}",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (minutesLeft < 0) PrimaryColor else MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        if (minutesLeft >= 0) "in ${formatMinutes(minutesLeft)}" else "due ${formatMinutes(-minutesLeft)} ago",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (minutesLeft < 0) PrimaryColor else OutlineColor
-                    )
+            // The other predictions of the models picked in Trends → Models
+            modelNext.chunked(2).forEach { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    pair.forEach { (label, at) -> NextAt(label, at, now, Modifier.weight(1f)) }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
+    }
+}
+
+/** "Next feed / ~14:30 / in 25m" (or "due 5m ago"). */
+@Composable
+private fun NextAt(label: String, at: Long, now: Long, modifier: Modifier = Modifier) {
+    val minutesLeft = ((at - now) / 60_000L).toInt()
+    Column(modifier = modifier) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = OutlineColor)
+        Text(
+            "~${TimeFormat.clock(at)}",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = if (minutesLeft < 0) PrimaryColor else MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            if (minutesLeft >= 0) "in ${formatMinutes(minutesLeft)}" else "due ${formatMinutes(-minutesLeft)} ago",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (minutesLeft < 0) PrimaryColor else OutlineColor
+        )
     }
 }
 

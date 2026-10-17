@@ -5,9 +5,161 @@ import kotlin.math.exp
 import kotlin.math.sqrt
 import kotlin.random.Random
 
-/** A fitted model: one number out for a row of inputs. */
-fun interface Regressor {
+/**
+ * A fitted model: one number out for a row of inputs. It can be saved as numbers ([encode]) and loaded back
+ * ([decode]), so a model picked in Trends keeps predicting for reminders and widgets after a restart.
+ */
+sealed interface Regressor {
     fun predict(x: DoubleArray): Double
+
+    fun encode(): DoubleArray
+
+    companion object {
+        fun decode(values: DoubleArray): Regressor = Reader(values).let { r ->
+            when (r.int()) {
+                0 -> ConstantModel(r.next())
+
+                1 -> {
+                    val p = r.int()
+                    LinearModel(r.scaler(p), r.next(), r.array(p))
+                }
+
+                2 -> TreesModel(r.next(), r.next(), List(r.int()) { r.node() })
+
+                3 -> {
+                    val p = r.int()
+                    val hidden = r.int()
+                    NetModel(r.scaler(p), r.next(), r.next(), hidden, r.array(hidden * p + 2 * hidden + 1))
+                }
+
+                4 -> {
+                    val p = r.int()
+                    val k = r.int()
+                    val n = r.int()
+                    val scaler = r.scaler(p)
+                    KnnModel(scaler, k, Array(n) { r.array(p) }, r.array(n))
+                }
+
+                else -> error("Unknown model")
+            }
+        }
+
+        /** A saved model as text (numbers separated by commas). */
+        fun fromText(text: String): Regressor = decode(text.split(',').map(String::toDouble).toDoubleArray())
+    }
+}
+
+fun Regressor.toText(): String = encode().joinToString(",")
+
+private class Reader(private val values: DoubleArray) {
+    private var at = 0
+
+    fun next() = values[at++]
+
+    fun int() = next().toInt()
+
+    fun array(n: Int) = DoubleArray(n) { next() }
+
+    fun scaler(p: Int) = Scaler(array(p), array(p))
+
+    fun node(): Node {
+        val feature = int()
+        return if (feature < 0) Leaf(next()) else Split(feature, next(), node(), node())
+    }
+}
+
+internal class ConstantModel(private val value: Double) : Regressor {
+    override fun predict(x: DoubleArray) = value
+
+    override fun encode() = doubleArrayOf(0.0, value)
+}
+
+internal class LinearModel(private val scaler: Scaler, private val intercept: Double, private val w: DoubleArray) : Regressor {
+    override fun predict(x: DoubleArray): Double {
+        val s = scaler.apply(x)
+        return intercept + s.indices.sumOf { w[it] * s[it] }
+    }
+
+    override fun encode() = doubleArrayOf(1.0, w.size.toDouble()) + scaler.encode() + intercept + w
+}
+
+internal sealed interface Node {
+    fun eval(x: DoubleArray): Double
+
+    fun encodeTo(out: MutableList<Double>)
+}
+
+internal class Leaf(val value: Double) : Node {
+    override fun eval(x: DoubleArray) = value
+
+    override fun encodeTo(out: MutableList<Double>) {
+        out += -1.0
+        out += value
+    }
+}
+
+internal class Split(val feature: Int, val threshold: Double, val left: Node, val right: Node) : Node {
+    override fun eval(x: DoubleArray) = if (x[feature] <= threshold) left.eval(x) else right.eval(x)
+
+    override fun encodeTo(out: MutableList<Double>) {
+        out += feature.toDouble()
+        out += threshold
+        left.encodeTo(out)
+        right.encodeTo(out)
+    }
+}
+
+internal class TreesModel(private val base: Double, private val learningRate: Double, private val forest: List<Node>) : Regressor {
+    override fun predict(x: DoubleArray) = base + learningRate * forest.sumOf { it.eval(x) }
+
+    override fun encode(): DoubleArray {
+        val out = mutableListOf(2.0, base, learningRate, forest.size.toDouble())
+        forest.forEach { it.encodeTo(out) }
+        return out.toDoubleArray()
+    }
+}
+
+internal class NetModel(
+    private val scaler: Scaler,
+    private val yMean: Double,
+    private val yStd: Double,
+    private val hidden: Int,
+    private val theta: DoubleArray // w1 (hidden × p), b1 (hidden), w2 (hidden), b2
+) : Regressor {
+    override fun predict(x: DoubleArray): Double {
+        val row = scaler.apply(x)
+        val p = row.size
+        val b1 = hidden * p
+        val w2 = b1 + hidden
+        var out = theta[w2 + hidden]
+        for (u in 0 until hidden) {
+            var a = theta[b1 + u]
+            for (j in 0 until p) a += theta[u * p + j] * row[j]
+            out += theta[w2 + u] * kotlin.math.tanh(a)
+        }
+        return yMean + yStd * out
+    }
+
+    override fun encode() = doubleArrayOf(3.0, scaler.size.toDouble(), hidden.toDouble()) + scaler.encode() + yMean + yStd + theta
+}
+
+internal class KnnModel(private val scaler: Scaler, private val k: Int, private val z: Array<DoubleArray>, private val y: DoubleArray) : Regressor {
+    override fun predict(x: DoubleArray): Double {
+        val row = scaler.apply(x)
+        val nearest = z.indices.map { i -> i to z[i].indices.sumOf { (z[i][it] - row[it]).let { d -> d * d } } }
+            .sortedBy { it.second }
+            .take(k)
+        val weights = nearest.map { exp(-sqrt(it.second) / 2) + 1e-9 }
+        return nearest.indices.sumOf { weights[it] * y[nearest[it].first] } / weights.sum()
+    }
+
+    override fun encode(): DoubleArray {
+        val out = mutableListOf(4.0, scaler.size.toDouble(), k.toDouble(), y.size.toDouble())
+        out += scaler.encode().toList()
+        z.forEach { out += it.toList() }
+        out += y.toList()
+        return out.toDoubleArray()
+    }
 }
 
 /** Fits a [Regressor] to rows [x] and targets [y]. Deterministic (seeded), so AutoML picks are repeatable. */
@@ -16,14 +168,23 @@ fun interface Trainer {
 }
 
 /** Column means and standard deviations, to put inputs on one scale (a constant column gets std 1). */
-internal class Scaler(x: Array<DoubleArray>) {
-    private val mean = DoubleArray(x[0].size) { j -> x.sumOf { it[j] } / x.size }
-    private val std = DoubleArray(x[0].size) { j ->
-        val v = x.sumOf { (it[j] - mean[j]).let { d -> d * d } } / x.size
-        sqrt(v).takeIf { it > 1e-9 } ?: 1.0
-    }
+internal class Scaler(private val mean: DoubleArray, private val std: DoubleArray) {
+    val size: Int get() = mean.size
 
     fun apply(row: DoubleArray) = DoubleArray(row.size) { (row[it] - mean[it]) / std[it] }
+
+    fun encode() = mean + std
+
+    companion object {
+        fun fit(x: Array<DoubleArray>): Scaler {
+            val mean = DoubleArray(x[0].size) { j -> x.sumOf { it[j] } / x.size }
+            val std = DoubleArray(x[0].size) { j ->
+                val v = x.sumOf { (it[j] - mean[j]).let { d -> d * d } } / x.size
+                sqrt(v).takeIf { it > 1e-9 } ?: 1.0
+            }
+            return Scaler(mean, std)
+        }
+    }
 }
 
 internal fun median(values: DoubleArray): Double {
@@ -35,16 +196,23 @@ internal fun median(values: DoubleArray): Double {
 
 /** Always the training median: the "typical gap" every model has to beat. */
 object MedianBaseline : Trainer {
-    override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor {
-        val m = median(y)
-        return Regressor { m }
-    }
+    override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor = ConstantModel(median(y))
+}
+
+/** Always [value]: the app's default estimate when it's a fixed interval from Settings. */
+class FixedValue(private val value: Double) : Trainer {
+    override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor = ConstantModel(value)
+}
+
+/** Always the training average: the app's default estimate (average interval) when no fixed one is set. */
+object MeanBaseline : Trainer {
+    override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor = ConstantModel(y.average())
 }
 
 /** Linear regression with an L2 penalty [lambda] on standardized inputs (closed form). */
 class RidgeRegression(private val lambda: Double) : Trainer {
     override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor {
-        val scaler = Scaler(x)
+        val scaler = Scaler.fit(x)
         val z = x.map(scaler::apply)
         val p = z[0].size
         val yMean = y.average()
@@ -52,10 +220,7 @@ class RidgeRegression(private val lambda: Double) : Trainer {
         val a = Array(p) { i -> DoubleArray(p) { j -> z.sumOf { it[i] * it[j] } + if (i == j) lambda else 0.0 } }
         val b = DoubleArray(p) { i -> z.indices.sumOf { r -> z[r][i] * (y[r] - yMean) } }
         val w = solve(a, b)
-        return Regressor { row ->
-            val s = scaler.apply(row)
-            yMean + s.indices.sumOf { w[it] * s[it] }
-        }
+        return LinearModel(scaler, yMean, w)
     }
 
     /** Gaussian elimination with partial pivoting; a singular system gives zeros for the free weights. */
@@ -94,18 +259,6 @@ class BoostedTrees(
     private val subsample: Double = 0.8,
     private val seed: Int = 7
 ) : Trainer {
-    private sealed interface Node {
-        fun eval(x: DoubleArray): Double
-    }
-
-    private class Leaf(val value: Double) : Node {
-        override fun eval(x: DoubleArray) = value
-    }
-
-    private class Split(val feature: Int, val threshold: Double, val left: Node, val right: Node) : Node {
-        override fun eval(x: DoubleArray) = if (x[feature] <= threshold) left.eval(x) else right.eval(x)
-    }
-
     override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor {
         val random = Random(seed)
         val base = y.average()
@@ -118,7 +271,7 @@ class BoostedTrees(
             forest += tree
             for (i in y.indices) f[i] += learningRate * tree.eval(x[i])
         }
-        return Regressor { row -> base + learningRate * forest.sumOf { it.eval(row) } }
+        return TreesModel(base, learningRate, forest)
     }
 
     private fun grow(x: Array<DoubleArray>, r: DoubleArray, rows: List<Int>, levels: Int): Node {
@@ -169,7 +322,7 @@ class NeuralNet(
 ) : Trainer {
     override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor {
         val random = Random(seed)
-        val scaler = Scaler(x)
+        val scaler = Scaler.fit(x)
         val z = x.map(scaler::apply)
         val p = z[0].size
         val yMean = y.average()
@@ -233,31 +386,15 @@ class NeuralNet(
                 }
             }
         }
-        return Regressor { raw ->
-            val row = scaler.apply(raw)
-            var out = theta[b2]
-            for (u in 0 until hidden) {
-                var a = theta[b1 + u]
-                for (j in 0 until p) a += theta[w1 + u * p + j] * row[j]
-                out += theta[w2 + u] * kotlin.math.tanh(a)
-            }
-            yMean + yStd * out
-        }
+        return NetModel(scaler, yMean, yStd, hidden, theta)
     }
 }
 
 /** k nearest neighbours (standardized inputs), averaging their targets weighted by closeness. */
 class NearestNeighbours(private val k: Int) : Trainer {
     override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor {
-        val scaler = Scaler(x)
+        val scaler = Scaler.fit(x)
         val z = x.map(scaler::apply)
-        return Regressor { raw ->
-            val row = scaler.apply(raw)
-            val nearest = z.indices.map { i -> i to z[i].indices.sumOf { (z[i][it] - row[it]).let { d -> d * d } } }
-                .sortedBy { it.second }
-                .take(k)
-            val weights = nearest.map { exp(-sqrt(it.second) / 2) + 1e-9 }
-            nearest.indices.sumOf { weights[it] * y[nearest[it].first] } / weights.sum()
-        }
+        return KnnModel(scaler, k, z.toTypedArray(), y.copyOf())
     }
 }

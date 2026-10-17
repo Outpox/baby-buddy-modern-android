@@ -5,6 +5,7 @@ import com.example.data.model.DiaperType
 import com.example.data.model.FeedType
 import com.example.data.model.FeedingEvent
 import com.example.data.model.SleepEvent
+import com.example.data.model.formatMinutes
 import java.util.Calendar
 import kotlin.math.PI
 import kotlin.math.cos
@@ -27,6 +28,7 @@ class RhythmEvents(
     val changes: List<DiaperEvent>,
     val sleeps: List<SleepEvent>, // finished sleeps
     val runningSleepStart: Long? = null,
+    /** Where "Age (days)" counts from: the birth date, else the start of the training window (saved with a model). */
     val birthMillis: Long? = null
 )
 
@@ -156,16 +158,79 @@ class RhythmModel(
     val samples: Int,
     val result: AutoMlResult?,
     val predictedMinutes: Double?,
-    val anchorMillis: Long?
+    val anchorMillis: Long?,
+    val ageOriginMillis: Long?,
+    val inputs: Int
 )
 
-/** Builds every rhythm's dataset and runs [AutoMl] on each (CPU-bound: call off the main thread). */
-fun trainRhythmModels(events: RhythmEvents, onProgress: (target: RhythmTarget, fraction: Float) -> Unit = { _, _ -> }): List<RhythmModel> = RhythmFeatures.build(events).map { set ->
+/**
+ * Builds every rhythm's dataset and runs [AutoMl] on each (CPU-bound: call off the main thread). [defaultMinutes]
+ * is the app's default estimate per rhythm, scored alongside for comparison: a fixed interval from Settings, or
+ * when there's none (null), the average interval.
+ */
+fun trainRhythmModels(
+    events: RhythmEvents,
+    defaultMinutes: Map<RhythmTarget, Int?> = emptyMap(),
+    onProgress: (target: RhythmTarget, fraction: Float) -> Unit = { _, _ -> }
+): List<RhythmModel> = RhythmFeatures.build(events).map { set ->
     if (set.data.size < AutoMl.MIN_ROWS) {
-        RhythmModel(set.target, set.data.size, null, null, null)
+        RhythmModel(set.target, set.data.size, null, null, null, events.birthMillis, set.data.features.size)
     } else {
-        val result = AutoMl.fit(set.data) { onProgress(set.target, it) }
+        val fixed = defaultMinutes[set.target]?.takeIf { it > 0 }
+        val default = if (fixed != null) {
+            Candidate("Default", "fixed ${formatMinutes(fixed)} from Settings", FixedValue(fixed.toDouble()))
+        } else {
+            Candidate("Default", "average interval", MeanBaseline)
+        }
+        val result = AutoMl.fit(set.data, default = default) { onProgress(set.target, it) }
         val predicted = set.current?.let { result.model.predict(it).coerceAtLeast(0.0) }
-        RhythmModel(set.target, set.data.size, result, predicted, set.currentAnchorMillis.takeIf { predicted != null })
+        RhythmModel(
+            set.target,
+            set.data.size,
+            result,
+            predicted,
+            set.currentAnchorMillis.takeIf { predicted != null },
+            events.birthMillis,
+            set.data.features.size
+        )
     }
 }
+
+/** A model picked in Trends → Models for reminders, Today and the summary widget. */
+class SavedRhythmModel(
+    val target: RhythmTarget,
+    val family: String,
+    val settings: String,
+    val mae: Double,
+    val model: Regressor,
+    val ageOriginMillis: Long,
+    val trainedAt: Long,
+    val inputs: Int // how many input columns it was trained on
+) {
+    fun toText(): String = listOf(target.name, family, settings, mae, ageOriginMillis, trainedAt, inputs, model.toText()).joinToString(SEP)
+
+    companion object {
+        private const val SEP = "\u001F"
+
+        fun fromText(text: String): SavedRhythmModel? = runCatching {
+            val f = text.split(SEP)
+            SavedRhythmModel(RhythmTarget.valueOf(f[0]), f[1], f[2], f[3].toDouble(), Regressor.fromText(f[7]), f[4].toLong(), f[5].toLong(), f[6].toInt())
+        }.getOrNull()
+    }
+}
+
+/** When a saved model expects the next event: [anchorMillis] (the feed, change, sleep start or wake-up it counts from) + its prediction. */
+data class RhythmPrediction(val anchorMillis: Long, val dueMillis: Long)
+
+/** Predicts with each saved model from recent events (a day or two is enough for its inputs). */
+fun predictRhythms(events: RhythmEvents, models: Collection<SavedRhythmModel>): Map<RhythmTarget, RhythmPrediction> = models.mapNotNull { saved ->
+    val set = RhythmFeatures.build(RhythmEvents(events.feeds, events.changes, events.sleeps, events.runningSleepStart, saved.ageOriginMillis))
+        .first { it.target == saved.target }
+    val row = set.current ?: return@mapNotNull null
+    val anchor = set.currentAnchorMillis ?: return@mapNotNull null
+    // A model saved before an update changed the inputs can't read the new row: no prediction until retrained
+    if (row.size != saved.inputs) return@mapNotNull null
+    val minutes = runCatching { saved.model.predict(row) }.getOrNull()?.takeIf { it.isFinite() }?.coerceIn(1.0, 24 * 60.0)
+        ?: return@mapNotNull null
+    saved.target to RhythmPrediction(anchor, anchor + (minutes * 60_000).toLong())
+}.toMap()

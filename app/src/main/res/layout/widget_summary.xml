@@ -95,4 +95,15 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- What's next, from the rhythm models picked in Trends → Models -->
+    <TextView
+        android:id="@+id/tv_summary_next"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:maxLines="2"
+        android:textColor="@color/bb_on_surface"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
 </LinearLayout>

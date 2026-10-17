@@ -8,23 +8,30 @@ class Dataset(val x: Array<DoubleArray>, val y: DoubleArray, val features: List<
     val size: Int get() = y.size
 }
 
-/** One model family with one choice of settings, e.g. boosted trees with 150 trees of depth 3. */
-data class Candidate(val family: String, val settings: String, val trainer: Trainer)
+/**
+ * One model family with one choice of settings, e.g. boosted trees with 150 trees of depth 3. A [reference]
+ * (the app's default estimate) is scored like the others for comparison but never picked.
+ */
+data class Candidate(val family: String, val settings: String, val trainer: Trainer, val reference: Boolean = false)
 
 /** How a candidate did on the held-out folds: mean absolute error, in the target's unit (minutes). */
-data class Score(val family: String, val settings: String, val mae: Double)
+data class Score(val family: String, val settings: String, val mae: Double, val reference: Boolean = false)
 
 data class AutoMlResult(
     val best: Score,
     val baseline: Score,
-    /** Best settings of each family, best first (the baseline included). */
+    /** The app's default estimate on the same folds, when one was given. */
+    val default: Score?,
+    /** Best settings of each family, best first (the baseline and the default included). */
     val leaderboard: List<Score>,
     /** The winner refitted on every row. */
     val model: Regressor,
     /** How much worse the winner gets when one input is shuffled (on the last fold), biggest first. */
     val importance: List<Pair<String, Double>>,
     /** Actual and predicted targets on the last held-out fold, oldest first. */
-    val lastFold: List<Pair<Double, Double>>
+    val lastFold: List<Pair<Double, Double>>,
+    /** A leaderboard entry's model fitted on every row (the winner's is [model]). CPU-bound. */
+    val refit: (Score) -> Regressor
 )
 
 object AutoMl {
@@ -48,14 +55,15 @@ object AutoMl {
      * the rows before them (as a model would be used: on what came before). Every candidate is scored by its
      * mean absolute error over those blocks; the best one is refitted on all rows.
      */
-    fun fit(data: Dataset, folds: Int = 3, candidates: List<Candidate> = candidates(), onProgress: (Float) -> Unit = {}): AutoMlResult {
+    fun fit(data: Dataset, folds: Int = 3, candidates: List<Candidate> = candidates(), default: Candidate? = null, onProgress: (Float) -> Unit = {}): AutoMlResult {
+        val all = candidates + listOfNotNull(default?.copy(reference = true))
         require(data.size >= MIN_ROWS) { "Need at least $MIN_ROWS rows" }
         val n = data.size
         val k = if (n < 40) 1 else folds
         val block = maxOf(n / 5 / k, 3)
         val splits = (k downTo 1).map { i -> (n - i * block) to (n - (i - 1) * block) } // (train end = test start, test end)
         var done = 0
-        val scored = candidates.map { c ->
+        val scored = all.map { c ->
             var errorSum = 0.0
             var count = 0
             for ((testStart, testEnd) in splits) {
@@ -65,11 +73,12 @@ object AutoMl {
                     count++
                 }
             }
-            onProgress(++done / (candidates.size + 2f))
-            c to Score(c.family, c.settings, errorSum / count)
+            onProgress(++done / (all.size + 2f))
+            c to Score(c.family, c.settings, errorSum / count, c.reference)
         }
-        val (bestCandidate, best) = scored.minBy { it.second.mae }
+        val (bestCandidate, best) = scored.filter { !it.first.reference }.minBy { it.second.mae }
         val baseline = scored.first { it.first.trainer === MedianBaseline }.second
+        val defaultScore = scored.firstOrNull { it.first.reference }?.second
         val leaderboard = scored.map { it.second }.groupBy { it.family }.map { (_, s) -> s.minBy { it.mae } }.sortedBy { it.mae }
 
         // Importance and the chart come from the winner on the last fold, which it hadn't seen
@@ -87,10 +96,12 @@ object AutoMl {
             } / test.size
             data.features[j] to (shuffledMae - foldMae).coerceAtLeast(0.0)
         }.sortedByDescending { it.second }
-        onProgress((candidates.size + 1f) / (candidates.size + 2f))
+        onProgress((all.size + 1f) / (all.size + 2f))
 
         val model = bestCandidate.trainer.fit(data.x, data.y)
         onProgress(1f)
-        return AutoMlResult(best, baseline, leaderboard, model, importance, lastFold)
+        val trainers = scored.associate { it.second to it.first.trainer }
+        val refit = { score: Score -> if (score == best) model else trainers.getValue(score).fit(data.x, data.y) }
+        return AutoMlResult(best, baseline, defaultScore, leaderboard, model, importance, lastFold, refit)
     }
 }

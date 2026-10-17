@@ -168,7 +168,8 @@ interface BabyBuddyApiService {
         @Query("child") child: Int? = null,
         @Query("start_min") since: String? = null,
         @Query("start_max") until: String? = null,
-        @Query("limit") limit: Int = 100
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int? = null
     ): Response<PaginatedResponse<BabyBuddyFeedingDto>>
 
     @POST("api/feedings/")
@@ -197,7 +198,8 @@ interface BabyBuddyApiService {
         @Query("start_min") since: String? = null,
         @Query("start_max") until: String? = null,
         @Query("end_min") endedSince: String? = null,
-        @Query("limit") limit: Int = 100
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int? = null
     ): Response<PaginatedResponse<BabyBuddySleepDto>>
 
     @POST("api/sleep/")
@@ -212,7 +214,8 @@ interface BabyBuddyApiService {
         @Query("child") child: Int? = null,
         @Query("date_min") since: String? = null,
         @Query("date_max") until: String? = null,
-        @Query("limit") limit: Int = 100
+        @Query("limit") limit: Int = 100,
+        @Query("offset") offset: Int? = null
     ): Response<PaginatedResponse<BabyBuddyChangeDto>>
 
     @POST("api/tummy-times/")

@@ -203,6 +203,8 @@ fun BabyBuddyApp(
     val use24h by viewModel.use24h.collectAsState()
     val modelsTab by viewModel.modelsTab.collectAsState()
     val modelsState by viewModel.modelsState.collectAsState()
+    val modelNext by viewModel.modelNextTimes.collectAsState()
+    val usedModels by viewModel.usedModels.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val noteTags by viewModel.noteTags.collectAsState()
     val milkStash by viewModel.milkStash.collectAsState()
@@ -298,6 +300,7 @@ fun BabyBuddyApp(
                         lastFeedMillis = lastFeedMillis,
                         lastSleepEndMillis = lastSleepEndMillis,
                         reminders = reminders,
+                        modelNext = modelNext,
                         hiddenItems = hiddenItems,
                         lastBathMillis = lastBathMillis,
                         onLogBath = { notes, time -> viewModel.logBath(time, notes) },
@@ -331,7 +334,16 @@ fun BabyBuddyApp(
                         babySex = babySex,
                         onBabySexChange = { viewModel.setBabySex(it) },
                         modelsTab = if (modelsTab) {
-                            { RhythmModelsTab(state = modelsState, onTrain = { viewModel.trainModels(it) }, hiddenItems = hiddenItems) }
+                            {
+                                RhythmModelsTab(
+                                    state = modelsState,
+                                    used = usedModels,
+                                    onTrain = { from, to -> viewModel.trainModels(from, to) },
+                                    onSave = { model, score -> viewModel.saveModel(model, score) },
+                                    onReset = { viewModel.resetModel(it) },
+                                    hiddenItems = hiddenItems
+                                )
+                            }
                         } else {
                             null
                         }
@@ -512,6 +524,7 @@ fun BabyBuddyApp(
                         },
                         onUse24hChange = { viewModel.setUse24h(it) },
                         modelsTab = modelsTab,
+                        modelTargets = usedModels.keys,
                         onModelsTabChange = { viewModel.setModelsTab(it) },
                         onFeedNotificationChange = { enabled ->
                             viewModel.setFeedNotificationEnabled(enabled)

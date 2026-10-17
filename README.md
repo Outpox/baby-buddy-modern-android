@@ -2,7 +2,7 @@
 
 An unofficial Android client for a self-hosted [Baby Buddy](https://github.com/babybuddy/babybuddy) server — track feeding, sleep, diapers, pumping, tummy time and more, with a live nursing timer that syncs between parents' phones in real time, home-screen widgets, lock-screen notifications and offline-first sync.
 
-> **Requires a Baby Buddy server.** This repo is *just the Android app*: it contains no backend and no database of its own. All of your data lives on (and is read from) a self-hosted [Baby Buddy](https://github.com/babybuddy/babybuddy) instance over its REST API. Without one, the app can only show the login screen. Go set up the excellent open-source [babybuddy/babybuddy](https://github.com/babybuddy/babybuddy) server first — huge props to that project; everything here builds on its API.
+> **Requires a Baby Buddy server.** This repo is *just the Android app*: it contains no backend and no database of its own. All of your data lives on (and is read from) a self-hosted [Baby Buddy](https://github.com/babybuddy/babybuddy) instance over its REST API. Without one you can still look around in the built-in **demo mode** (sample data, everything works except syncing). Go set up the excellent open-source [babybuddy/babybuddy](https://github.com/babybuddy/babybuddy) server first — huge props to that project; everything here builds on its API.
 
 Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Google AI Studio.
 
@@ -27,6 +27,16 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
     <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/04-history.png" alt="History" width="250"></td>
     <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/05-settings.png" alt="Settings" width="250"></td>
   </tr>
+  <tr>
+    <td align="center"><b>Rhythm models</b></td>
+    <td align="center"><b>Model evaluation</b></td>
+    <td align="center"><b>Predicted next times</b></td>
+  </tr>
+  <tr>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/10-models.png" alt="Trends Models tab: the estimate in use for each rhythm, with Reset" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/11-model-card.png" alt="A rhythm's models compared with the default estimate, with Save this version" width="250"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/12-today-predictions.png" alt="Today showing the next feed, diaper and sleep predicted by the models" width="250"></td>
+  </tr>
 </table>
 
 <sub>Screenshots use the built-in demo data.</sub>
@@ -39,13 +49,16 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
 - **Log screen** — one list to log breastfeeding, bottle, diaper, sleep, pumping, bath and growth; tap an entry to open its form. Quick notes for your server's tags live on Today.
 - **Home-screen widgets** — three widgets: **Quick log** (one-tap feed/diaper/pump/tummy-time buttons), **Timer** (live self-ticking clock with side, pause and end controls) and **Summary** (today's counts at a glance), all driven straight from the app's state.
 - **Lock-screen notifications** — while a feed runs, an ongoing notification shows the live clock and Left/Right/End controls; a running sleep gets its own lock-screen timer notification. Both can be turned off in Settings.
-- **Reminders & notifications** — optional "feed due", "awake for" and "asleep for" alarms that refresh from the server before posting, plus sync-status and undo toasts.
+- **Reminders & notifications** — optional "feed due", "diaper change due", "awake for" and "asleep for" alarms with an optional heads-up 5–60 minutes before, which refresh from the server before posting, plus sync-status and undo toasts.
+- **Rhythm models (optional)** — fits a model per rhythm on the phone (AutoML over linear regression, boosted trees, a small neural net and nearest neighbours), shows how each compares with the default estimate, and can time the reminders, Today's "next" times and the summary widget. See [Rhythm models](#rhythm-models).
 - **Growth** — weight, length and head circumference, with each measurement's percentile and charts against the [WHO Child Growth Standards](https://www.who.int/tools/child-growth-standards) (birth to 2 years).
+- **Demo mode** — "Try Demo Mode with Sample Data" on the login screen: 90 days of a simulated baby's feeds, diapers, sleep, pumping, baths and growth, with reminders and rhythm models already set up.
 - **History & Trends** — week-by-week history (feeds, diapers, sleep, pumping, tummy time, baths and notes, all editable) and 24-hour rhythm charts for feeding, sleep and diaper patterns.
 - **Shared timers — live sync between parents.** A running breastfeed or sleep started on one phone is mirrored through the Baby Buddy timers API and shows up on every other parent's phone within seconds: the other parent sees the live clock and current side, can switch sides or end the feed, and if a timer is stopped on one device it ends everywhere. Both phones stay in sync of who started what and when (newest change wins).
 - **Offline-first** — writes are queued locally and flushed in order with retry/backoff; today's entries are cached on the device.
 - **Night mode** — automatic dim warm palette (by time of day or system setting).
-- **12/24-hour clock**, scroll-wheel or typed time entry, per-phone tracked-item hiding, configurable quick actions.
+- **12/24-hour clock**, scroll-wheel (one continuous date and time: minutes roll into hours, hours into days) or typed time entry, per-phone tracked-item hiding, configurable quick actions.
+- **About** — Settings → About shows the version, build type, git tag/commit and build date, for bug reports.
 
 ### Home-screen widgets
 
@@ -55,7 +68,7 @@ Three home-screen widgets that update straight from the app's state, even when t
 
 - **Quick log** — one-tap Feed, Diaper and Tummy time buttons, with the baby's name, age and when they were last fed.
 - **Nursing timer** — the running feed's live clock, current side and start time, with Switch side and Pause/Resume buttons.
-- **Today summary** — today's feed count and wet/dirty diapers; tap to open the app.
+- **Today summary** — today's feed count and wet/dirty diapers, plus the next feed/diaper/nap when [rhythm models](#rhythm-models) are in use; tap to open the app.
 
 Add them from the launcher's widget list or from **Customize Today → Phone Home Screen** in the app.
 
@@ -77,10 +90,43 @@ Both can be turned off in Settings → Notifications.
 
 ### Reminders
 
-- **Feed Due Alarm**: Reminds you when a configurable time (e.g., 3 hours) has elapsed since the last feed started.
-- **Awake For Alarm**: Alerts when the baby has been awake for a set threshold to prevent overtiredness.
-- **Asleep For Alarm**: Notifies when a timed sleep session reaches a set duration limit.
-- *Multi-device awareness*: Reminders verify against the Baby Buddy server before alerting, so if another caregiver logs a feed on another phone, false alarms are automatically suppressed.
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/13-reminders.png" alt="Notification settings: feed, awake, sleep and diaper reminders and the heads-up choice" width="250" align="right">
+
+Settings → Notifications:
+
+- **Feed reminder**: when a set time (e.g. 3 hours) has passed since the last feed started.
+- **Awake reminder**: when the baby has been awake for a set time, to catch the nap window.
+- **Sleep reminder**: when a timed sleep reaches a set length.
+- **Diaper reminder**: when a set time has passed since the last change.
+- **Heads-up before**: also notify 5, 10, 15, 20, 30, 45 or 60 minutes before any of these is due ("Feed due in 15m"); the due notification replaces it.
+- With a [rhythm model](#rhythm-models) saved for that rhythm, the reminder fires when the model expects it instead of after the fixed time (which stays as the fallback).
+- *Multi-device awareness*: reminders check the Baby Buddy server before alerting, so a feed or change logged on another phone cancels them.
+
+<br clear="right">
+
+### Rhythm models
+
+An optional tab in Trends that learns your baby's rhythm, on the phone, and can use it to estimate what's next.
+
+**Turn it on:** Settings → Appearance → **Models tab in Trends**. Then open **Trends → Models**.
+
+<table>
+  <tr>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/14-enable-models.png" alt="Settings, Appearance: Models tab in Trends switch" width="220"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/10-models.png" alt="Models tab" width="220"></td>
+    <td><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/11-model-card.png" alt="A rhythm's evaluation" width="220"></td>
+  </tr>
+</table>
+
+1. **Pick the history to learn from**: the last 30, 60, 90 or 180 days, or **Custom…** for any date range (e.g. to leave out a week of illness). Tap **Fit models**; it takes a few seconds to a minute.
+2. **Four rhythms**, each with its own model: time to the **next feed**, the **next diaper change**, how long a **sleep** lasts (the expected wake-up) and how long the baby stays **awake** between sleeps (the next nap). Each model's inputs include the time of day, the baby's age, the previous intervals, the time since the last feed/change/wake-up, the feed's length and amount, and the last 24 hours' totals.
+3. **AutoML** tries linear regression, gradient-boosted trees, a small neural network and nearest neighbours, each with several settings, and scores them by how well they predicted your most recent entries when trained only on older ones. Each card shows every family's best typical error **next to the default estimate's** (the reminder's fixed interval, or the average interval when none is set), which inputs matter most, and a chart of actual vs predicted.
+4. **Use it**: pick a model in the list (the best is selected) and tap **Use …**. After fitting again later, **Save this version** replaces the saved model for that rhythm; the card shows the saved and new errors side by side.
+5. **Revert any time**: **Reset to default** on a card, or **Reset** / **Reset all** under *Estimates in use* at the top of the tab, goes back to the default estimate.
+
+A saved model then sets the time for that rhythm's **reminder**, Today's **Next feed / Next diaper / Next sleep / Wake-up** card and the **summary widget**'s "Next:" line, recalculated whenever a feed, change or sleep is logged on any phone. Everything (training and the saved models) stays on the phone; the server only provides your entries. The demo mode starts with models fitted and in use.
+
+Predictions are estimates from past patterns, not advice; babies change quickly, so fit again every week or two.
 
 ## Requirements
 
@@ -130,7 +176,9 @@ cp tools/hooks/blocklist.example tools/hooks/blocklist.local   # names/addresses
 4. Plain `http://` addresses work too (e.g. a server on your home network), but the token is then sent unencrypted; prefer HTTPS or a VPN away from home.
 5. If your server uses a self-signed certificate, turn on **Allow self-signed certificates**. This switches off certificate checking for the connection, so only use it on a network you trust (a VPN or your home network).
 
-The API token and Cloudflare secret are stored encrypted with an Android Keystore key. Without a saved login the app shows only the login screen.
+The API token and Cloudflare secret are stored encrypted with an Android Keystore key.
+
+No server yet? Tap **No server yet? Try the demo** at the top of the login screen (or **Try Demo Mode with Sample Data** under the form): the whole app, Settings included, runs on 90 days of simulated sample data, with growth charts, reminders and fitted rhythm models. Log in to your own server from Settings → Server connection when you're ready; the demo's data and models are left behind.
 
 ### Run tests
 
@@ -147,6 +195,7 @@ app/src/main/java/com/example/
 ├── MainActivity.kt           # navigation switch, theming, screen host
 ├── data/
 │   ├── api/                  # Retrofit service + DTOs for the Baby Buddy REST API
+│   ├── ml/                   # rhythm models: features, regressors, AutoML (pure Kotlin)
 │   ├── model/                # UI models, time formatting
 │   └── repository/           # BabyBuddyRepository (single source of truth), offline
 │                             # store, write queue, shared timers, secret cipher
@@ -169,7 +218,7 @@ The app uses only stock Baby Buddy API endpoints (`/api/children`, `/api/feeding
 - baths (a note tagged `bath`), milk stash (a note tagged `milk-stash`)
 - length is stored in `/api/height` (the WHO uses lying-down length under 2 years)
 
-Settings kept only on the phone: your caregiver name, theme, clock format, reminders, tracked items, Today cards, and the boy/girl choice used to pick the WHO charts (Baby Buddy has no such field).
+Settings kept only on the phone: your caregiver name, theme, clock format, reminders, tracked items, Today cards, saved rhythm models, and the boy/girl choice used to pick the WHO charts (Baby Buddy has no such field).
 
 ## Privacy
 

@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.ml.RhythmModel
 import com.example.data.ml.RhythmTarget
+import com.example.data.ml.SavedRhythmModel
+import com.example.data.ml.Score
 import com.example.data.ml.trainRhythmModels
 import com.example.data.model.BATH_TAG
 import com.example.data.model.BabyProfile
@@ -230,7 +232,7 @@ class MainViewModel(
 
         data class Training(val step: String, val progress: Float) : ModelsState
 
-        data class Ready(val models: List<RhythmModel>, val days: Int, val trainedAt: Long) : ModelsState
+        data class Ready(val models: List<RhythmModel>, val fromMillis: Long, val toMillis: Long, val trainedAt: Long) : ModelsState
 
         data class Failed(val message: String) : ModelsState
     }
@@ -239,22 +241,61 @@ class MainViewModel(
     val modelsState: StateFlow<ModelsState> = _modelsState.asStateFlow()
     private var modelsJob: Job? = null
 
-    fun trainModels(days: Int) {
+    /** The models saved for reminders, Today and the widget, and what they predict next. */
+    val usedModels: StateFlow<Map<RhythmTarget, SavedRhythmModel>> = repository.usedModels
+    val modelNextTimes: StateFlow<Map<RhythmTarget, Long>> = repository.modelNextTimes
+
+    /** Fits every rhythm's models on the entries from [fromMillis] to [toMillis]. */
+    fun trainModels(fromMillis: Long, toMillis: Long) {
         modelsJob?.cancel()
         modelsJob = viewModelScope.launch {
+            val days = ((toMillis - fromMillis) / 86_400_000L).coerceAtLeast(1)
             _modelsState.value = ModelsState.Training("Loading $days days of entries", 0f)
-            val events = repository.loadRhythmEvents(days, repository.babyProfile.value.birthDate).getOrElse {
+            val events = repository.loadRhythmEvents(fromMillis, toMillis, repository.babyProfile.value.birthDate).getOrElse {
                 _modelsState.value = ModelsState.Failed(it.localizedMessage ?: "Couldn't load entries")
                 return@launch
             }
             val targets = RhythmTarget.entries.size
+            val r = repository.reminders.value
+            val defaults = mapOf(
+                RhythmTarget.FEED_GAP to r.feedAfterMinutes,
+                RhythmTarget.DIAPER_GAP to r.diaperAfterMinutes,
+                RhythmTarget.SLEEP_LENGTH to r.sleepAfterMinutes,
+                RhythmTarget.AWAKE_WINDOW to r.awakeAfterMinutes
+            )
             val models = withContext(Dispatchers.Default) {
-                trainRhythmModels(events) { target, fraction ->
+                trainRhythmModels(events, defaults) { target, fraction ->
                     _modelsState.value = ModelsState.Training("Fitting ${target.title.lowercase()}", (target.ordinal + fraction) / targets)
                 }
             }
-            _modelsState.value = ModelsState.Ready(models, days, System.currentTimeMillis())
+            _modelsState.value = ModelsState.Ready(models, fromMillis, toMillis, System.currentTimeMillis())
         }
+    }
+
+    /** Saves [score]'s model (refitted on all of [model]'s entries) as the estimate for its rhythm, replacing any saved one. */
+    fun saveModel(model: RhythmModel, score: Score) {
+        val result = model.result ?: return
+        viewModelScope.launch {
+            val fitted = withContext(Dispatchers.Default) { result.refit(score) }
+            val saved = SavedRhythmModel(
+                target = model.target,
+                family = score.family,
+                settings = score.settings,
+                mae = score.mae,
+                model = fitted,
+                ageOriginMillis = model.ageOriginMillis ?: System.currentTimeMillis(),
+                trainedAt = (_modelsState.value as? ModelsState.Ready)?.trainedAt ?: System.currentTimeMillis(),
+                inputs = model.inputs
+            )
+            repository.setUsedModel(model.target, saved)
+            showToast("${model.target.title}: now estimated by ${score.family.lowercase()}")
+        }
+    }
+
+    /** Back to the default estimate (the fixed interval / weekly average) for [target], or for every rhythm. */
+    fun resetModel(target: RhythmTarget? = null) {
+        (if (target == null) RhythmTarget.entries else listOf(target)).forEach { repository.setUsedModel(it, null) }
+        showToast(if (target == null) "All rhythms back to the default estimate" else "${target.title}: back to the default estimate")
     }
 
     // Widgets State

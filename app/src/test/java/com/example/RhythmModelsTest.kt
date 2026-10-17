@@ -2,17 +2,24 @@ package com.example
 
 import com.example.data.ml.AutoMl
 import com.example.data.ml.BoostedTrees
+import com.example.data.ml.Candidate
 import com.example.data.ml.Dataset
+import com.example.data.ml.FixedValue
 import com.example.data.ml.NeuralNet
+import com.example.data.ml.Regressor
 import com.example.data.ml.RhythmEvents
 import com.example.data.ml.RhythmTarget
 import com.example.data.ml.RidgeRegression
+import com.example.data.ml.SavedRhythmModel
+import com.example.data.ml.predictRhythms
+import com.example.data.ml.toText
 import com.example.data.ml.trainRhythmModels
 import com.example.data.model.DiaperEvent
 import com.example.data.model.DiaperType
 import com.example.data.model.FeedType
 import com.example.data.model.FeedingEvent
 import com.example.data.model.SleepEvent
+import com.example.data.repository.generateDemoHistory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -96,5 +103,67 @@ class RhythmModelsTest {
     fun `too little history gives no model`() {
         val models = trainRhythmModels(syntheticEvents(1))
         assertNull(models.first { it.target == RhythmTarget.FEED_GAP }.result)
+    }
+
+    @Test
+    fun `every model predicts the same after saving and loading`() {
+        val y = DoubleArray(x.size) { 3 * x[it][0] + if (x[it][1] > 5) 40.0 else 0.0 }
+        AutoMl.candidates().forEach { c ->
+            val model = c.trainer.fit(x, y)
+            val loaded = Regressor.fromText(model.toText())
+            x.take(20).forEach { row -> assertEquals(c.family, model.predict(row), loaded.predict(row), 1e-9) }
+        }
+    }
+
+    @Test
+    fun `the default estimate is scored for comparison but never picked`() {
+        val y = DoubleArray(x.size) { 100.0 + x[it][0] }
+        // A fixed interval that happens to be nearly perfect still isn't a model to save
+        val result = AutoMl.fit(Dataset(x, y, listOf("a", "b", "c")), default = Candidate("Default", "fixed", FixedValue(105.0)))
+        val default = requireNotNull(result.default)
+        assertTrue(default.reference)
+        assertTrue(default in result.leaderboard)
+        assertTrue(!result.best.reference)
+    }
+
+    @Test
+    fun `a saved model predicts the next feed from recent entries`() {
+        val events = syntheticEvents(30)
+        val model = trainRhythmModels(events, mapOf(RhythmTarget.FEED_GAP to 180)).first { it.target == RhythmTarget.FEED_GAP }
+        val result = requireNotNull(model.result)
+        assertEquals("fixed 3h 00m from Settings", result.default?.settings)
+        val saved = SavedRhythmModel(RhythmTarget.FEED_GAP, result.best.family, result.best.settings, result.best.mae, result.model, model.ageOriginMillis ?: 0L, 1L, model.inputs)
+        val reloaded = requireNotNull(SavedRhythmModel.fromText(saved.toText()))
+        // Only the last two days, as the app keeps for predicting
+        val since = events.feeds.last().timeMillis - 2 * 24 * 3_600_000L
+        val recent = RhythmEvents(events.feeds.filter { it.timeMillis >= since }, events.changes.filter { it.timeMillis >= since }, events.sleeps.filter { it.timeMillis >= since })
+        val prediction = requireNotNull(predictRhythms(recent, listOf(reloaded))[RhythmTarget.FEED_GAP])
+        assertEquals(events.feeds.last().timeMillis, prediction.anchorMillis)
+        assertEquals(model.predictedMinutes!!, (prediction.dueMillis - prediction.anchorMillis) / 60_000.0, 20.0)
+        // A model saved for other inputs (an app update changed them) gives no prediction
+        val stale = SavedRhythmModel(RhythmTarget.FEED_GAP, "x", "y", 1.0, result.model, 0L, 1L, model.inputs + 1)
+        assertNull(predictRhythms(recent, listOf(stale))[RhythmTarget.FEED_GAP])
+    }
+
+    @Test
+    fun `the demo data trains every rhythm, and models beat the default estimate`() {
+        val now = System.currentTimeMillis()
+        val demo = generateDemoHistory(now = now, birthMillis = now - 270 * 86_400_000L) { "" }
+        assertTrue(demo.growth.size >= 27) // monthly weight, length and head since birth
+        val from = now - 60 * 86_400_000L
+        val events = RhythmEvents(
+            demo.feeds.filter { it.timeMillis >= from },
+            demo.diapers.filter { it.timeMillis >= from },
+            demo.sleeps.filter { it.timeMillis >= from },
+            birthMillis = now - 270 * 86_400_000L
+        )
+        val defaults = mapOf(RhythmTarget.FEED_GAP to 180, RhythmTarget.DIAPER_GAP to 180, RhythmTarget.SLEEP_LENGTH to 150, RhythmTarget.AWAKE_WINDOW to 120)
+        val models = trainRhythmModels(events, defaults)
+        models.forEach { m ->
+            val result = requireNotNull(m.result) { "${m.target}: ${m.samples} rows" }
+            val default = requireNotNull(result.default)
+            println("${m.target}: ${m.samples} rows, best ${result.best.family} ±${result.best.mae.toInt()}m, default ±${default.mae.toInt()}m")
+            assertTrue("${m.target} best ${result.best} default $default", result.best.mae < default.mae)
+        }
     }
 }

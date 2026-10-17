@@ -1,0 +1,3 @@
+- Rhythm models: train on any date range, compare every model with the default estimate, save one per rhythm (or Reset to default) to time reminders, Today's next feed/diaper/sleep/wake-up and the summary widget
+- Demo mode shows everything: 90 days of sample data, growth, reminders, fitted models and all of Settings; "Try the demo" link at the top of the login screen
+- Settings → About: version, git tag/commit and build date

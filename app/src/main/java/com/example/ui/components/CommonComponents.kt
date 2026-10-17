@@ -173,7 +173,7 @@ fun AppBottomNav(
     onNavigate: (ScreenDestination) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isLoggedIn = connectionConfig.isConnected && !connectionConfig.isDemoMode
+    val hasSettings = connectionConfig.isConnected // logged in, or in demo mode
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -241,8 +241,8 @@ fun AppBottomNav(
             )
 
             NavItem(
-                icon = if (isLoggedIn) Icons.Default.Settings else Icons.Default.AccountCircle,
-                label = if (isLoggedIn) "Settings" else "Login",
+                icon = if (hasSettings) Icons.Default.Settings else Icons.Default.AccountCircle,
+                label = if (hasSettings) "Settings" else "Login",
                 isSelected = currentScreen == ScreenDestination.CONNECT_SERVER,
                 onClick = { onNavigate(ScreenDestination.CONNECT_SERVER) }
             )

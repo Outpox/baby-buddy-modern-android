@@ -65,9 +65,27 @@ class BabyBuddyApplication : Application() {
                 .collect { (feed, sleep, enabled) -> TimerSyncService.sync(this@BabyBuddyApplication, feed || sleep, enabled) }
         }
         appScope.launch {
-            // Feed / diaper / awake / sleep reminders follow every feed, change, sleep and settings change, from any phone
+            // The picked rhythm models' predictions (Trends → Models) follow every feed, change and sleep
             combine(
-                combine(repository.reminders, repository.hiddenItems, repository.lastDiaper.map { it?.timeMillis }) { r, h, d -> Triple(r, h, d) },
+                repository.usedModels,
+                repository.lastFeedMillis,
+                repository.lastDiaper.map { it?.timeMillis },
+                repository.lastSleepEndMillis,
+                combine(repository.sleepTimer.map { it.startMillis }, repository.liveTimerState.map { it.isRunning }) { s, f -> s to f }
+            ) { _, _, _, _, _ -> Unit }.collectLatest {
+                delay(500)
+                repository.updatePredictions()
+            }
+        }
+        appScope.launch {
+            // Feed / diaper / awake / sleep reminders follow every feed, change, sleep, prediction and settings change, from any phone
+            combine(
+                combine(
+                    repository.reminders,
+                    repository.hiddenItems,
+                    repository.lastDiaper.map { it?.timeMillis },
+                    repository.rhythmPredictions
+                ) { r, h, d, p -> listOf(r, h, d, p) },
                 repository.lastFeedMillis,
                 repository.lastSleepEndMillis,
                 repository.sleepTimer.map { it.startMillis }, // a sleep starting/ending, or its start edited

@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -42,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,7 +63,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.R
+import com.example.data.ml.RhythmTarget
 import com.example.data.model.BabySex
 import com.example.data.model.ReminderSettings
 import com.example.data.model.ServerConnectionConfig
@@ -133,6 +138,8 @@ private fun SwitchSetting(title: String, description: String, checked: Boolean, 
     }
 }
 
+private const val MODEL_TIMED = "When the model saved in Trends → Models expects it; the time below is the fallback"
+
 @Composable
 fun ConnectBackendScreen(
     config: ServerConnectionConfig,
@@ -149,6 +156,7 @@ fun ConnectBackendScreen(
     use24h: Boolean = true,
     onUse24hChange: (Boolean) -> Unit = {},
     modelsTab: Boolean = false,
+    modelTargets: Set<RhythmTarget> = emptySet(), // rhythms whose reminders a saved model times (Trends → Models)
     onModelsTabChange: (Boolean) -> Unit = {},
     themeMode: ThemeMode = ThemeMode.BY_TIME,
     onThemeModeChange: (ThemeMode) -> Unit = {},
@@ -160,6 +168,8 @@ fun ConnectBackendScreen(
     modifier: Modifier = Modifier
 ) {
     val isLoggedIn = config.isConnected && !config.isDemoMode
+    // Demo mode gets the whole of Settings too, so every feature can be tried; its Server connection logs in for real
+    val showSettings = config.isConnected
     var serverUrl by remember { mutableStateOf(config.serverUrl) }
     var apiToken by remember { mutableStateOf(config.apiToken) }
     var tokenVisible by remember { mutableStateOf(false) }
@@ -171,13 +181,14 @@ fun ConnectBackendScreen(
 
     // The open category (its own page within Settings), or null for the list of categories
     var openSection by rememberSaveable { mutableStateOf<String?>(null) }
-    BackHandler(enabled = isLoggedIn && openSection != null) { openSection = null }
+    BackHandler(enabled = showSettings && openSection != null) { openSection = null }
     val sectionTitles = mapOf(
         "connection" to "Server connection",
         "you" to "You",
         "tracked" to "Tracked items",
         "appearance" to "Appearance",
-        "notifications" to "Notifications"
+        "notifications" to "Notifications",
+        "about" to "About"
     )
 
     // Server URL, token, certificates, Cloudflare and the Connect button
@@ -362,7 +373,7 @@ fun ConnectBackendScreen(
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (!isLoggedIn) {
+        if (!showSettings) {
             // First run / logged out: this is the login screen
             Column(
                 modifier = Modifier.padding(top = 48.dp, bottom = 8.dp),
@@ -374,6 +385,10 @@ fun ConnectBackendScreen(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Up top as well as under the form, so it's seen before the server fields
+                TextButton(onClick = onEnterDemoMode, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("demo_mode_link")) {
+                    Text("No server yet? Try the demo with sample data →", color = PrimaryColor, fontWeight = FontWeight.Medium)
+                }
             }
             connectionForm()
             Spacer(modifier = Modifier.height(24.dp))
@@ -552,7 +567,11 @@ fun ConnectBackendScreen(
                 SwitchSetting(
                     title = "Feed reminder",
                     description = if (reminders.feedAfterMinutes > 0) {
-                        "When ${formatMinutes(reminders.feedAfterMinutes)} have passed since the last feed started"
+                        if (RhythmTarget.FEED_GAP in modelTargets) {
+                            MODEL_TIMED
+                        } else {
+                            "When ${formatMinutes(reminders.feedAfterMinutes)} have passed since the last feed started"
+                        }
                     } else {
                         "Notify when the next feed is due"
                     },
@@ -572,7 +591,7 @@ fun ConnectBackendScreen(
                 SwitchSetting(
                     title = "Awake reminder",
                     description = if (reminders.awakeAfterMinutes > 0) {
-                        "When the baby has been awake ${formatMinutes(reminders.awakeAfterMinutes)}"
+                        if (RhythmTarget.AWAKE_WINDOW in modelTargets) MODEL_TIMED else "When the baby has been awake ${formatMinutes(reminders.awakeAfterMinutes)}"
                     } else {
                         "Notify when it's been a while since the last sleep"
                     },
@@ -592,7 +611,7 @@ fun ConnectBackendScreen(
                 SwitchSetting(
                     title = "Sleep reminder",
                     description = if (reminders.sleepAfterMinutes > 0) {
-                        "When a timed sleep has lasted ${formatMinutes(reminders.sleepAfterMinutes)}"
+                        if (RhythmTarget.SLEEP_LENGTH in modelTargets) MODEL_TIMED else "When a timed sleep has lasted ${formatMinutes(reminders.sleepAfterMinutes)}"
                     } else {
                         "Notify when the baby has been asleep a long time"
                     },
@@ -612,7 +631,11 @@ fun ConnectBackendScreen(
                 SwitchSetting(
                     title = "Diaper reminder",
                     description = if (reminders.diaperAfterMinutes > 0) {
-                        "When ${formatMinutes(reminders.diaperAfterMinutes)} have passed since the last change"
+                        if (RhythmTarget.DIAPER_GAP in modelTargets) {
+                            MODEL_TIMED
+                        } else {
+                            "When ${formatMinutes(reminders.diaperAfterMinutes)} have passed since the last change"
+                        }
                     } else {
                         "Notify when the next diaper change is due"
                     },
@@ -658,6 +681,29 @@ fun ConnectBackendScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        SettingsSection(
+            title = "About",
+            summary = "Version ${BuildConfig.VERSION_NAME} · built ${BuildConfig.BUILD_DATE}",
+            icon = Icons.Default.Info,
+            expanded = openSection == "about",
+            hidden = openSection != null && openSection != "about",
+            onOpen = { openSection = "about" }
+        ) {
+            // What to quote in a bug report: the release, the exact commit and when it was built
+            listOf(
+                "Version" to "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                "Build" to BuildConfig.BUILD_TYPE,
+                "Git tag / commit" to BuildConfig.GIT_DESCRIBE,
+                "Build date" to BuildConfig.BUILD_DATE,
+                "App ID" to BuildConfig.APPLICATION_ID
+            ).forEach { (label, value) ->
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))

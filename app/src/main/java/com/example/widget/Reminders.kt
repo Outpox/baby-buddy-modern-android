@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.data.ml.RhythmTarget
 import com.example.data.model.TimeFormat
 import com.example.data.model.TrackedItem
 import com.example.data.model.formatMinutes
@@ -45,7 +46,10 @@ object Reminders {
     private const val MISSED_GRACE_MS = 2 * 60 * 60_000L // a reminder missed by more than this is skipped
     private const val EARLY_ALARM_SLACK_MS = 60_000L // an alarm a little early still counts as on time
 
-    /** (anchor, due time): the last feed/change/wake-up/sleep start and when to remind, or null when off or not applicable. */
+    /**
+     * (anchor, due time): the last feed/change/wake-up/sleep start and when to remind, or null when off or not
+     * applicable. A model picked in Trends → Models for that rhythm sets the due time instead of the fixed interval.
+     */
     private fun due(kind: String): Pair<Long, Long>? {
         val repo = BabyBuddyRepository.instance
         val settings = repo.reminders.value
@@ -55,27 +59,27 @@ object Reminders {
                 if (settings.feedAfterMinutes <= 0 || repo.liveTimerState.value.isRunning) return null
                 if (TrackedItem.BREASTFEEDING in hidden && TrackedItem.BOTTLE in hidden) return null
                 val last = repo.lastFeedMillis.value ?: return null
-                last to last + settings.feedAfterMinutes * 60_000L
+                last to (repo.modelDue(RhythmTarget.FEED_GAP, last) ?: (last + settings.feedAfterMinutes * 60_000L))
             }
 
             KIND_DIAPER -> {
                 if (settings.diaperAfterMinutes <= 0 || TrackedItem.DIAPERS in hidden) return null
                 val last = repo.lastDiaper.value?.timeMillis ?: return null
-                last to last + settings.diaperAfterMinutes * 60_000L
+                last to (repo.modelDue(RhythmTarget.DIAPER_GAP, last) ?: (last + settings.diaperAfterMinutes * 60_000L))
             }
 
             KIND_SLEEP -> {
                 // Long sleep: counts from the start of the sleep being timed (on any phone)
                 val sleep = repo.sleepTimer.value
                 if (settings.sleepAfterMinutes <= 0 || !sleep.isRunning || TrackedItem.SLEEP in hidden) return null
-                sleep.startMillis to sleep.startMillis + settings.sleepAfterMinutes * 60_000L
+                sleep.startMillis to (repo.modelDue(RhythmTarget.SLEEP_LENGTH, sleep.startMillis) ?: (sleep.startMillis + settings.sleepAfterMinutes * 60_000L))
             }
 
             else -> {
                 if (settings.awakeAfterMinutes <= 0 || repo.sleepTimer.value.isRunning) return null
                 if (TrackedItem.SLEEP in hidden) return null
                 val woke = repo.lastSleepEndMillis.value ?: return null
-                woke to woke + settings.awakeAfterMinutes * 60_000L
+                woke to (repo.modelDue(RhythmTarget.AWAKE_WINDOW, woke) ?: (woke + settings.awakeAfterMinutes * 60_000L))
             }
         }
     }
@@ -122,7 +126,10 @@ object Reminders {
 
     /** Alarm fired: post if still due (after a refresh), else reschedule. */
     internal suspend fun onAlarm(context: Context, kind: String) {
-        withTimeoutOrNull(20_000L) { BabyBuddyRepository.instance.refresh() }
+        withTimeoutOrNull(20_000L) {
+            BabyBuddyRepository.instance.refresh()
+            BabyBuddyRepository.instance.updatePredictions()
+        }
         schedule(context, kind, System.currentTimeMillis() + EARLY_ALARM_SLACK_MS)
     }
 
@@ -222,7 +229,10 @@ class RescheduleReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 // Fresh entries first, so a feed logged on another phone meanwhile is counted
-                withTimeoutOrNull(20_000L) { BabyBuddyRepository.instance.refresh() }
+                withTimeoutOrNull(20_000L) {
+                    BabyBuddyRepository.instance.refresh()
+                    BabyBuddyRepository.instance.updatePredictions()
+                }
                 Reminders.schedule(context.applicationContext)
             } finally {
                 result.finish()

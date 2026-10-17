@@ -5,9 +5,12 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
+import android.view.View
 import android.widget.RemoteViews
 import com.example.MainActivity
 import com.example.R
+import com.example.data.ml.RhythmTarget
+import com.example.data.model.TimeFormat
 import com.example.data.repository.BabyBuddyRepository
 
 class BabyBuddySummaryWidget : AppWidgetProvider() {
@@ -25,12 +28,15 @@ class BabyBuddySummaryWidget : AppWidgetProvider() {
         val wetCount = diapers.count { it.type.name.contains("WET") || it.type.name.contains("BOTH") }
         val dirtyCount = diapers.count { it.type.name.contains("DIRTY") || it.type.name.contains("BOTH") }
         val diaperText = "$wetCount wet · $dirtyCount dirty"
+        val nextText = nextUpText(repo.modelNextTimes.value)
 
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.widget_summary)
 
             views.setTextViewText(R.id.tv_summary_feed, feedText)
             views.setTextViewText(R.id.tv_summary_diapers, diaperText)
+            views.setTextViewText(R.id.tv_summary_next, nextText)
+            views.setViewVisibility(R.id.tv_summary_next, if (nextText.isEmpty()) View.GONE else View.VISIBLE)
 
             // Clicking opens Today Dashboard
             val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -51,5 +57,20 @@ class BabyBuddySummaryWidget : AppWidgetProvider() {
 
     companion object {
         private const val REQ_SUMMARY_OPEN = 301
+
+        /** "Next: feed ~15:40 · diaper ~16:10 · nap ~14:55", or empty without picked models. */
+        fun nextUpText(next: Map<RhythmTarget, Long>): String {
+            if (next.isEmpty()) return ""
+            val parts = next.entries.sortedBy { it.value }.map { (target, at) ->
+                val what = when (target) {
+                    RhythmTarget.FEED_GAP -> "feed"
+                    RhythmTarget.DIAPER_GAP -> "diaper"
+                    RhythmTarget.SLEEP_LENGTH -> "wake-up"
+                    RhythmTarget.AWAKE_WINDOW -> "nap"
+                }
+                "$what ~${TimeFormat.clock(at)}"
+            }
+            return "Next: " + parts.joinToString(" · ")
+        }
     }
 }

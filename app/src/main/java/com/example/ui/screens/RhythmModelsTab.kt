@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,18 +19,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import com.example.data.ml.AutoMl
 import com.example.data.ml.RhythmModel
 import com.example.data.ml.RhythmTarget
+import com.example.data.ml.SavedRhythmModel
+import com.example.data.ml.Score
 import com.example.data.model.TimeFormat
 import com.example.data.model.TrackedItem
 import com.example.data.model.formatMinutes
@@ -50,6 +62,11 @@ import com.example.ui.theme.PrimaryColor
 import com.example.ui.theme.SecondaryColor
 import com.example.ui.theme.SurfaceContainerLow
 import com.example.ui.theme.SurfaceContainerLowest
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.roundToInt
 
 private val CardShape = RoundedCornerShape(20.dp)
@@ -66,47 +83,109 @@ private fun RhythmTarget.hidden(hidden: Set<TrackedItem>) = when (this) {
     else -> item() in hidden
 }
 
+/** Midnight (local) of the calendar day a date picker's UTC [utcMillis] stands for. */
+private fun localDayStart(utcMillis: Long): Long {
+    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+    return Calendar.getInstance().apply {
+        clear()
+        set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
+}
+
+/** "17 Oct", or "17 Oct 2025" outside this year. */
+private fun dayLabel(millis: Long): String {
+    val sameYear = Calendar.getInstance().apply { timeInMillis = millis }.get(Calendar.YEAR) == Calendar.getInstance().get(Calendar.YEAR)
+    return SimpleDateFormat(if (sameYear) "d MMM" else "d MMM yyyy", Locale.getDefault()).format(Date(millis))
+}
+
 /**
  * Trends → Models: for each rhythm (feed gaps, diaper gaps, sleep length, awake windows) AutoML fits linear
- * regression, boosted trees, a small neural net and nearest neighbours on the phone, keeps the one that best
- * predicted the most recent entries, and uses it for "next feed around 15:40".
+ * regression, boosted trees, a small neural net and nearest neighbours on the phone and scores them, and the
+ * app's default estimate, on how well they predicted the latest entries. A model can be saved per rhythm (any of
+ * the leaderboard, the best by default) to estimate reminders, Today and the summary widget; Reset goes back
+ * to the default estimate.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RhythmModelsTab(state: ModelsState, onTrain: (days: Int) -> Unit, hiddenItems: Set<TrackedItem>) {
-    var days by remember { mutableStateOf((state as? ModelsState.Ready)?.days ?: 60) }
+fun RhythmModelsTab(
+    state: ModelsState,
+    used: Map<RhythmTarget, SavedRhythmModel>,
+    onTrain: (fromMillis: Long, toMillis: Long) -> Unit,
+    onSave: (RhythmModel, Score) -> Unit,
+    onReset: (RhythmTarget?) -> Unit,
+    hiddenItems: Set<TrackedItem>
+) {
+    val day = 24 * 60 * 60_000L
+    // Days back from now, or a custom from–to range (null days)
+    var days by rememberSaveable { mutableStateOf<Int?>(60) }
+    var customFrom by rememberSaveable { mutableStateOf<Long?>(null) }
+    var customTo by rememberSaveable { mutableStateOf<Long?>(null) }
+    var picking by remember { mutableStateOf(false) }
+    fun range(): Pair<Long, Long> {
+        val now = System.currentTimeMillis()
+        val d = days
+        return if (d != null || customFrom == null || customTo == null) {
+            now - (d ?: 60) * day to now
+        } else {
+            customFrom!! to minOf(customTo!!, now)
+        }
+    }
+    if (picking) {
+        val pickerState = rememberDateRangePickerState(
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= System.currentTimeMillis()
+            }
+        )
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(
+                    enabled = pickerState.selectedStartDateMillis != null && pickerState.selectedEndDateMillis != null,
+                    onClick = {
+                        customFrom = localDayStart(pickerState.selectedStartDateMillis!!)
+                        customTo = localDayStart(pickerState.selectedEndDateMillis!!) + day // to the end of that day
+                        days = null
+                        picking = false
+                    }
+                ) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } }
+        ) {
+            DateRangePicker(state = pickerState, modifier = Modifier.weight(1f))
+        }
+    }
+    val shown = RhythmTarget.entries.filterNot { it.hidden(hiddenItems) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(
             "Each rhythm gets its own model, chosen automatically: linear regression, boosted trees, a small " +
-                "neural net and nearest neighbours are each tried with several settings, scored on how well they " +
-                "predicted your latest entries, and the best one is kept. Everything runs on this phone.",
+                "neural net and nearest neighbours are each tried with several settings and scored, next to the " +
+                "app's default estimate, on how well they predicted your latest entries. Save one to have it " +
+                "estimate reminders, Today and the widget. Everything runs on this phone.",
             style = MaterialTheme.typography.bodySmall,
             color = OnSurfaceVariant
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            listOf(30, 60, 90).forEach { option ->
-                val selected = option == days
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(if (selected) PrimaryColor else SurfaceContainerLow)
-                        .clickable { days = option }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Text("$option days", style = MaterialTheme.typography.labelLarge, color = if (selected) OnPrimary else OnSurfaceVariant)
-                }
+        EstimatesInUse(shown, used, onReset)
+        Text("Train on", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(30, 60, 90, 180).forEach { option ->
+                Chip("$option days", selected = days == option) { days = option }
             }
-            Spacer(Modifier.weight(1f))
-            Button(
-                onClick = { onTrain(days) },
-                enabled = state !is ModelsState.Training,
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryColor, contentColor = OnPrimary)
-            ) {
-                Text(if (state is ModelsState.Ready) "Retrain" else "Train")
-            }
+            Chip(
+                if (days == null && customFrom != null) "${dayLabel(customFrom!!)} – ${dayLabel(customTo!! - day)}" else "Custom…",
+                selected = days == null
+            ) { picking = true }
+        }
+        Button(
+            onClick = { range().let { (from, to) -> onTrain(from, to) } },
+            enabled = state !is ModelsState.Training,
+            colors = ButtonDefaults.buttonColors(containerColor = PrimaryColor, contentColor = OnPrimary),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (state is ModelsState.Ready) "Fit again" else "Fit models")
         }
         when (state) {
             ModelsState.Idle -> Text(
-                "Pick how much history to learn from and tap Train. It takes a few seconds.",
+                "Pick how much history to learn from and tap Fit models. It takes a few seconds.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = OnSurfaceVariant
             )
@@ -120,18 +199,75 @@ fun RhythmModelsTab(state: ModelsState, onTrain: (days: Int) -> Unit, hiddenItem
 
             is ModelsState.Ready -> {
                 Text(
-                    "Trained on the last ${state.days} days at ${TimeFormat.clock(state.trainedAt)}",
+                    "Fitted on ${dayLabel(state.fromMillis)} – ${dayLabel(state.toMillis - 1)} at ${TimeFormat.clock(state.trainedAt)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = OnSurfaceVariant
                 )
-                state.models.filterNot { it.target.hidden(hiddenItems) }.forEach { ModelCard(it) }
+                state.models.filter { it.target in shown }.forEach { model ->
+                    ModelCard(model, used[model.target], state.trainedAt, onSave = { onSave(model, it) }, onReset = { onReset(model.target) })
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ModelCard(model: RhythmModel) {
+private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) PrimaryColor else SurfaceContainerLow)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Text(text, style = MaterialTheme.typography.labelLarge, color = if (selected) OnPrimary else OnSurfaceVariant)
+    }
+}
+
+/** What estimates each rhythm now: the default, or a saved model (with Reset); Reset all when any is saved. */
+@Composable
+private fun EstimatesInUse(targets: List<RhythmTarget>, used: Map<RhythmTarget, SavedRhythmModel>, onReset: (RhythmTarget?) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(CardShape)
+            .background(SurfaceContainerLow)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Estimates in use", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = OnSurface, modifier = Modifier.weight(1f))
+            if (targets.any { it in used }) {
+                TextButton(onClick = { onReset(null) }) { Text("Reset all", color = PrimaryColor) }
+            }
+        }
+        targets.forEach { target ->
+            val saved = used[target]
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(ItemColors.tint(target.item())))
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(target.title, style = MaterialTheme.typography.bodyMedium, color = OnSurface)
+                    Text(
+                        if (saved == null) {
+                            "Default estimate"
+                        } else {
+                            "${saved.family} (${saved.settings}) · ±${formatMinutes(saved.mae.roundToInt())} · fitted ${dayLabel(saved.trainedAt)}"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariant
+                    )
+                }
+                if (saved != null) {
+                    TextButton(onClick = { onReset(target) }) { Text("Reset", color = PrimaryColor) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelCard(model: RhythmModel, saved: SavedRhythmModel?, trainedAt: Long, onSave: (Score) -> Unit, onReset: () -> Unit) {
     val tint = ItemColors.tint(model.target.item())
     val soft = ItemColors.soft(model.target.item())
     Column(
@@ -159,40 +295,96 @@ private fun ModelCard(model: RhythmModel) {
             )
             return@Column
         }
+        var selected by remember(result) { mutableStateOf(result.best) }
         Prediction(model)
+        val reference = result.default ?: result.baseline
         Text(
-            "Best: ${result.best.family} (${result.best.settings}), typically off by ${formatMinutes(result.best.mae.roundToInt())}" +
-                if (result.best.mae < result.baseline.mae) {
-                    ", ${((1 - result.best.mae / result.baseline.mae) * 100).roundToInt()}% better than the typical interval"
+            "Best: ${result.best.family} (${result.best.settings}), typically off by ${formatMinutes(result.best.mae.roundToInt())}. " +
+                "The default estimate (${reference.settings}) is off by ${formatMinutes(reference.mae.roundToInt())}" +
+                if (result.best.mae < reference.mae) {
+                    ": ${((1 - result.best.mae / reference.mae) * 100).roundToInt()}% better."
                 } else {
-                    "; nothing beat the typical interval yet"
+                    ", so the default is as good here."
                 },
             style = MaterialTheme.typography.bodySmall,
             color = OnSurfaceVariant
         )
-        // Leaderboard: each family's best settings
+        // Leaderboard: each family's best settings; tap one to save it instead of the best
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Models tried", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+            Text("Models tried (typical error)", style = MaterialTheme.typography.labelLarge, color = OnSurface)
             val worst = result.leaderboard.maxOf { it.mae }.coerceAtLeast(1.0)
             result.leaderboard.forEach { score ->
-                val isBest = score == result.best
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+                val isSelected = score == selected
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isSelected) soft.copy(alpha = 0.5f) else Color.Transparent)
+                        .clickable(enabled = !score.reference) { selected = score }
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                ) {
+                    RadioButton(
+                        selected = isSelected,
+                        onClick = { selected = score },
+                        enabled = !score.reference,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Column(Modifier.weight(1f).padding(start = 6.dp)) {
                         Text(
-                            score.family,
+                            if (score.reference) "Default estimate" else score.family,
                             style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (isBest) FontWeight.Bold else FontWeight.Normal,
+                            fontWeight = if (score == result.best) FontWeight.Bold else FontWeight.Normal,
                             color = OnSurface
                         )
                         Text(score.settings, style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
                     }
-                    Bar(fraction = (score.mae / worst).toFloat(), color = if (isBest) tint else soft, modifier = Modifier.width(96.dp))
+                    Bar(
+                        fraction = (score.mae / worst).toFloat(),
+                        color = if (score.reference) {
+                            OutlineVariant
+                        } else if (isSelected) {
+                            tint
+                        } else {
+                            soft
+                        },
+                        modifier = Modifier.width(72.dp)
+                    )
                     Text(
                         "±${formatMinutes(score.mae.roundToInt())}",
                         style = MaterialTheme.typography.labelMedium,
                         color = OnSurfaceVariant,
-                        modifier = Modifier.width(64.dp).padding(start = 8.dp)
+                        modifier = Modifier.width(60.dp).padding(start = 8.dp)
                     )
+                }
+            }
+        }
+        // Saving: this fit's selected model becomes the rhythm's estimate (replacing a saved one)
+        val isSaved = saved != null && saved.trainedAt == trainedAt && saved.family == selected.family && saved.settings == selected.settings
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (saved != null && !isSaved) {
+                Text(
+                    "In use now: ${saved.family}, ±${formatMinutes(saved.mae.roundToInt())} (fitted ${dayLabel(saved.trainedAt)}). " +
+                        "This fit's ${selected.family.lowercase()}: ±${formatMinutes(selected.mae.roundToInt())}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { onSave(selected) },
+                    enabled = !isSaved,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryColor, contentColor = OnPrimary)
+                ) {
+                    Text(
+                        when {
+                            isSaved -> "In use"
+                            saved != null -> "Save this version"
+                            else -> "Use ${selected.family.lowercase()}"
+                        }
+                    )
+                }
+                if (saved != null) {
+                    TextButton(onClick = onReset) { Text("Reset to default", color = PrimaryColor) }
                 }
             }
         }
@@ -200,7 +392,7 @@ private fun ModelCard(model: RhythmModel) {
         val important = result.importance.filter { it.second > 0.05 }.take(5)
         if (important.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("What matters most", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                Text("What matters most (${result.best.family.lowercase()})", style = MaterialTheme.typography.labelLarge, color = OnSurface)
                 val top = important.first().second
                 important.forEach { (name, gain) ->
                     Row(verticalAlignment = Alignment.CenterVertically) {

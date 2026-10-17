@@ -1,7 +1,30 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
 }
+
+// Version details for Settings → About: the git tag/commit this was built from, and when it was built
+// (SOURCE_DATE_EPOCH when set, as reproducible builds such as F-Droid's do; the date only, so the
+// configuration cache is reused through the day)
+val gitDescribe: String = runCatching {
+  providers.exec {
+    commandLine("git", "describe", "--tags", "--always", "--dirty")
+    isIgnoreExitValue = true
+  }.standardOutput.asText.get().trim()
+}.getOrDefault("").ifBlank { "unknown" }
+
+abstract class BuildDate : ValueSource<String, ValueSourceParameters.None> {
+  override fun obtain(): String {
+    val millis = System.getenv("SOURCE_DATE_EPOCH")?.toLongOrNull()?.times(1000) ?: System.currentTimeMillis()
+    return SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(millis))
+  }
+}
+val buildDate: String = providers.of(BuildDate::class.java) {}.get()
 
 android {
   namespace = "com.example"
@@ -13,10 +36,12 @@ android {
     targetSdk = 36
     // Bump both for each release (versionCode = MAJOR*10000 + MINOR*100 + PATCH), then tag vX.Y.Z;
     // the release workflow checks the tag matches. Kept as literals so F-Droid can read them.
-    versionCode = 10300
-    versionName = "1.3.0"
+    versionCode = 10400
+    versionName = "1.4.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("String", "GIT_DESCRIBE", "\"$gitDescribe\"")
+    buildConfigField("String", "BUILD_DATE", "\"$buildDate\"")
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
