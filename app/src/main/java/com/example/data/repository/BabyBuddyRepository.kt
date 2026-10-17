@@ -39,6 +39,7 @@ import com.example.data.model.FeedType
 import com.example.data.model.FeedingEvent
 import com.example.data.model.GrowthEvent
 import com.example.data.model.GrowthKind
+import com.example.data.model.HandoffSummary
 import com.example.data.model.HistoryDay
 import com.example.data.model.LiveTimerState
 import com.example.data.model.MILK_STASH_TAG
@@ -330,6 +331,62 @@ class BabyBuddyRepository {
     fun setFeedNotificationEnabled(enabled: Boolean) {
         _feedNotificationEnabled.value = enabled
         prefs?.edit()?.putBoolean(PREF_FEED_NOTIFICATION, enabled)?.apply()
+    }
+
+    private val _nextUpNotification = MutableStateFlow(false)
+
+    /** Silent notification with what's next (feed, diaper, sleep) while no timer runs (Settings → Notifications). */
+    val nextUpNotification: StateFlow<Boolean> = _nextUpNotification.asStateFlow()
+
+    fun setNextUpNotification(enabled: Boolean) {
+        _nextUpNotification.value = enabled
+        prefs?.edit()?.putBoolean(PREF_NEXT_UP_NOTIFICATION, enabled)?.apply()
+    }
+
+    private val _handoff = MutableStateFlow<HandoffSummary?>(null)
+
+    /** Entries other caregivers logged while this phone was away from the app, until dismissed. */
+    val handoff: StateFlow<HandoffSummary?> = _handoff.asStateFlow()
+
+    /** The app went to the background: entries others log from now on make the next [checkHandoff]'s summary. */
+    fun markAway() {
+        prefs?.edit()?.putLong(PREF_AWAY_SINCE, System.currentTimeMillis())?.apply()
+    }
+
+    fun dismissHandoff() {
+        _handoff.value = null
+    }
+
+    /**
+     * Back in the app (after a refresh): collects the feeds, changes and sleeps someone else logged since [markAway]
+     * (at most the last day). With a caregiver name set, everything not carrying it counts; without one, only
+     * entries that name someone. Keeps the previous summary when nothing new came in.
+     */
+    suspend fun checkHandoff() {
+        val p = prefs ?: return
+        val since = p.getLong(PREF_AWAY_SINCE, 0L)
+        if (since <= 0L) return
+        p.edit().remove(PREF_AWAY_SINCE).apply()
+        if (!_connectionConfig.value.isConnected) return
+        val from = maxOf(since, System.currentTimeMillis() - 24 * 60 * 60_000L)
+        val (feeds, changes, sleeps) = if (from >= startOfTodayMillis()) {
+            Triple(_feedings.value, _diapers.value, _sleeps.value)
+        } else {
+            withContext(Dispatchers.IO) { runCatching { fetchEvents(from) }.getOrNull() } ?: Triple(_feedings.value, _diapers.value, _sleeps.value)
+        }
+        val me = myName()
+        fun byOther(caregiver: String?) = if (me != null) !caregiver.equals(me, ignoreCase = true) else !caregiver.isNullOrBlank()
+        val hidden = _hiddenItems.value
+        val summary = HandoffSummary(
+            sinceMillis = from,
+            feedings = feeds.filter { f ->
+                f.timeMillis >= from && byOther(f.caregiver) &&
+                    (if (f.type == FeedType.NURSING) TrackedItem.BREASTFEEDING else TrackedItem.BOTTLE) !in hidden
+            }.sortedBy { it.timeMillis },
+            diapers = changes.filter { it.timeMillis >= from && byOther(it.caregiver) && TrackedItem.DIAPERS !in hidden }.sortedBy { it.timeMillis },
+            sleeps = sleeps.filter { it.id != -1L && it.endMillis >= from && byOther(it.caregiver) && TrackedItem.SLEEP !in hidden }.sortedBy { it.timeMillis }
+        )
+        if (!summary.isEmpty) _handoff.value = summary
     }
 
     private fun myName(): String? = _caregiverName.value.ifBlank { null }
@@ -1165,6 +1222,31 @@ class BabyBuddyRepository {
         }.stateIn(syncScope, SharingStarted.Eagerly, emptyMap())
     }
 
+    /**
+     * What's next for the next-up notification: [modelNextTimes], else the next feed and diaper change by the
+     * reminder intervals (Settings → Notifications).
+     */
+    val nextUpTimes: StateFlow<Map<RhythmTarget, Long>> by lazy {
+        combine(
+            modelNextTimes,
+            _reminders,
+            combine(lastFeedMillis, lastDiaper.map { it?.timeMillis }) { feed, diaper -> feed to diaper },
+            _liveTimerState.map { it.isRunning },
+            _hiddenItems
+        ) { model, reminders, (lastFeed, lastChange), feeding, hidden ->
+            buildMap {
+                putAll(model)
+                val feedsShown = TrackedItem.BREASTFEEDING !in hidden || TrackedItem.BOTTLE !in hidden
+                if (RhythmTarget.FEED_GAP !in model && feedsShown && !feeding && lastFeed != null && reminders.feedAfterMinutes > 0) {
+                    put(RhythmTarget.FEED_GAP, lastFeed + reminders.feedAfterMinutes * 60_000L)
+                }
+                if (RhythmTarget.DIAPER_GAP !in model && TrackedItem.DIAPERS !in hidden && lastChange != null && reminders.diaperAfterMinutes > 0) {
+                    put(RhythmTarget.DIAPER_GAP, lastChange + reminders.diaperAfterMinutes * 60_000L)
+                }
+            }
+        }.stateIn(syncScope, SharingStarted.Eagerly, emptyMap())
+    }
+
     /** Recomputes [rhythmPredictions]: today's entries from memory, the day before from the server. */
     suspend fun updatePredictions() = predictionMutex.withLock {
         val models = _usedModels.value.values
@@ -1328,6 +1410,8 @@ class BabyBuddyRepository {
         _temperatures.value = emptyList()
         _notes.value = emptyList()
         _growth.value = emptyList()
+        _handoff.value = null
+        prefs?.edit()?.remove(PREF_AWAY_SINCE)?.apply()
         // Saved rhythm models learned this child's (or the demo's) rhythm
         RhythmTarget.entries.forEach { setUsedModel(it, null) }
         _babyProfile.value = BabyProfile(name = "My Baby", shortName = "Baby", ageFormatted = "Newborn")
@@ -2569,6 +2653,7 @@ class BabyBuddyRepository {
         p.edit().remove(LEGACY_PREF_TOKEN).apply() // earlier builds stored the token in plain text
         _caregiverName.value = p.getString(PREF_CAREGIVER, "").orEmpty()
         _feedNotificationEnabled.value = p.getBoolean(PREF_FEED_NOTIFICATION, true)
+        _nextUpNotification.value = p.getBoolean(PREF_NEXT_UP_NOTIFICATION, false)
         _use24h.value = p.getBoolean(PREF_USE_24H, true)
         _modelsTab.value = p.getBoolean(PREF_MODELS_TAB, false)
         val mp = context.applicationContext.getSharedPreferences(MODEL_PREFS, Context.MODE_PRIVATE)
@@ -2873,6 +2958,8 @@ class BabyBuddyRepository {
         private const val PREF_SLEEP_NOTES = "sleep_timer_notes"
         private const val PREF_CAREGIVER = "caregiver_name"
         private const val PREF_FEED_NOTIFICATION = "feed_notification"
+        private const val PREF_NEXT_UP_NOTIFICATION = "next_up_notification"
+        private const val PREF_AWAY_SINCE = "away_since"
         private const val PREF_QUICK_ACTIONS = "quick_actions"
         private const val PREF_USE_24H = "use_24h"
         private const val PREF_THEME_MODE = "theme_mode"

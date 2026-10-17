@@ -22,6 +22,7 @@ import com.example.data.model.FeedIntervalStats
 import com.example.data.model.FeedingEvent
 import com.example.data.model.GrowthEvent
 import com.example.data.model.GrowthKind
+import com.example.data.model.HandoffSummary
 import com.example.data.model.HistoryDay
 import com.example.data.model.LiveTimerState
 import com.example.data.model.NoteEvent
@@ -334,6 +335,13 @@ class MainViewModel(
     val themeMode: StateFlow<ThemeMode> = repository.themeMode
     fun setThemeMode(mode: ThemeMode) = repository.setThemeMode(mode)
     fun setFeedNotificationEnabled(enabled: Boolean) = repository.setFeedNotificationEnabled(enabled)
+    val nextUpNotification: StateFlow<Boolean> = repository.nextUpNotification
+    fun setNextUpNotification(enabled: Boolean) = repository.setNextUpNotification(enabled)
+
+    /** "While you were away" on Today: what other caregivers logged since this phone left the app. */
+    val handoff: StateFlow<HandoffSummary?> = repository.handoff
+    fun dismissHandoff() = repository.dismissHandoff()
+    fun markAway() = repository.markAway()
 
     // Feed-interval card on Today
     private val _feedIntervals = MutableStateFlow<FeedIntervalStats?>(null)
@@ -349,6 +357,7 @@ class MainViewModel(
         refreshJob = viewModelScope.launch {
             _isRefreshing.value = true
             if (repository.refresh() || repository.connectionConfig.value.isDemoMode) {
+                repository.checkHandoff()
                 repository.loadFeedIntervals().onSuccess { _feedIntervals.value = it }
             }
             _isRefreshing.value = false

@@ -203,6 +203,18 @@ data class ReminderSettings(
     val anyOn: Boolean get() = feedAfterMinutes > 0 || awakeAfterMinutes > 0 || sleepAfterMinutes > 0 || diaperAfterMinutes > 0
 }
 
+/** What other caregivers logged while this phone was away from the app ("While you were away" on Today). */
+data class HandoffSummary(
+    val sinceMillis: Long,
+    val feedings: List<FeedingEvent> = emptyList(),
+    val diapers: List<DiaperEvent> = emptyList(),
+    val sleeps: List<SleepEvent> = emptyList()
+) {
+    val isEmpty: Boolean get() = feedings.isEmpty() && diapers.isEmpty() && sleeps.isEmpty()
+    val caregivers: List<String>
+        get() = (feedings.map { it.caregiver } + diapers.map { it.caregiver } + sleeps.map { it.caregiver }).filterNotNull().distinct()
+}
+
 /** What this phone tracks (Settings → Tracked items); a hidden item disappears everywhere in the app. */
 enum class TrackedItem(val label: String, val description: String) {
     BREASTFEEDING("Breastfeeding", "Left/Right timer, last side, nursing stats"),

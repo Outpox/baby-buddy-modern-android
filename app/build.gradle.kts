@@ -36,8 +36,8 @@ android {
     targetSdk = 36
     // Bump both for each release (versionCode = MAJOR*10000 + MINOR*100 + PATCH), then tag vX.Y.Z;
     // the release workflow checks the tag matches. Kept as literals so F-Droid can read them.
-    versionCode = 10401
-    versionName = "1.4.1"
+    versionCode = 10500
+    versionName = "1.5.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "GIT_DESCRIBE", "\"$gitDescribe\"")

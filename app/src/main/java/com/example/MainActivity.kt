@@ -1,10 +1,12 @@
 package com.example
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.service.quicksettings.TileService
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -39,6 +41,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.model.BreastSide
 import com.example.data.model.ThemeMode
 import com.example.ui.HistoryFilter
 import com.example.ui.MainViewModel
@@ -58,7 +61,10 @@ import com.example.ui.screens.TodayDashboardScreen
 import com.example.ui.screens.TrendsScreen
 import com.example.ui.theme.AppTheme
 import com.example.ui.theme.MyApplicationTheme
+import com.example.widget.AppShortcuts
 import com.example.widget.BabyBuddyQuickLogWidget
+import com.example.widget.DiaperTileService
+import com.example.widget.SleepTileService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -119,7 +125,7 @@ class MainActivity : ComponentActivity() {
         // Lock-screen timers and reminders both need it; asked again if it was turned off later
         val reminders = mainViewModel.reminders.value
         val remindersOn = reminders.anyOn
-        if (mainViewModel.feedNotificationEnabled.value || remindersOn) requestNotificationPermission()
+        if (mainViewModel.feedNotificationEnabled.value || remindersOn || mainViewModel.nextUpNotification.value) requestNotificationPermission()
     }
 
     private val notificationPermission =
@@ -145,7 +151,39 @@ class MainActivity : ComponentActivity() {
         handleWidgetNavigation(intent, mainViewModel)
     }
 
+    override fun onStop() {
+        super.onStop()
+        // Entries other caregivers log from now on show as "While you were away" when this phone comes back
+        if (!isChangingConfigurations) mainViewModel.markAway()
+    }
+
     private fun handleWidgetNavigation(intent: Intent?, vm: MainViewModel) {
+        // Long-press on a Quick Settings tile opens its screen
+        if (intent?.action == TileService.ACTION_QS_TILE_PREFERENCES) {
+            @Suppress("DEPRECATION")
+            val tile = intent.getParcelableExtra<ComponentName>(Intent.EXTRA_COMPONENT_NAME)?.className
+            vm.navigateTo(
+                when (tile) {
+                    SleepTileService::class.java.name -> ScreenDestination.SLEEP
+                    DiaperTileService::class.java.name -> ScreenDestination.LOG_DIAPER
+                    else -> ScreenDestination.ACTIVE_NURSING_TIMER
+                }
+            )
+            return
+        }
+        // Launcher shortcuts (AppShortcuts) may also start something
+        if (vm.connectionConfig.value.isConnected) {
+            val timer = vm.liveTimerState.value
+            when (val action = intent?.getStringExtra(AppShortcuts.EXTRA_SHORTCUT_ACTION)) {
+                AppShortcuts.FEED_LEFT, AppShortcuts.FEED_RIGHT -> {
+                    val side = if (action == AppShortcuts.FEED_LEFT) BreastSide.LEFT else BreastSide.RIGHT
+                    // Starts, resumes or switches to that side; never pauses it
+                    if (!(timer.isRunning && !timer.isPaused && timer.activeBreast == side)) vm.tapSide(side)
+                }
+
+                AppShortcuts.START_SLEEP -> if (!vm.sleepTimer.value.isRunning) vm.startSleep()
+            }
+        }
         val target = intent?.getStringExtra(BabyBuddyQuickLogWidget.EXTRA_NAVIGATE_TO) ?: return
         when (target) {
             "ACTIVE_NURSING_TIMER" -> vm.navigateTo(ScreenDestination.ACTIVE_NURSING_TIMER)
@@ -201,6 +239,8 @@ fun BabyBuddyApp(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val caregiverName by viewModel.caregiverName.collectAsState()
     val feedNotificationEnabled by viewModel.feedNotificationEnabled.collectAsState()
+    val nextUpNotification by viewModel.nextUpNotification.collectAsState()
+    val handoff by viewModel.handoff.collectAsState()
     val use24h by viewModel.use24h.collectAsState()
     val modelsTab by viewModel.modelsTab.collectAsState()
     val modelsState by viewModel.modelsState.collectAsState()
@@ -274,6 +314,8 @@ fun BabyBuddyApp(
                     TodayDashboardScreen(
                         liveTimerState = liveTimerState,
                         connectionConfig = connectionConfig,
+                        handoff = handoff,
+                        onDismissHandoff = { viewModel.dismissHandoff() },
                         recentFeedings = recentFeedings,
                         recentDiapers = recentDiapers,
                         recentTummyTimes = recentTummyTimes,
@@ -532,6 +574,11 @@ fun BabyBuddyApp(
                         onModelsTabChange = { viewModel.setModelsTab(it) },
                         onFeedNotificationChange = { enabled ->
                             viewModel.setFeedNotificationEnabled(enabled)
+                            if (enabled) (context as? MainActivity)?.requestNotificationPermission()
+                        },
+                        nextUpNotification = nextUpNotification,
+                        onNextUpNotificationChange = { enabled ->
+                            viewModel.setNextUpNotification(enabled)
                             if (enabled) (context as? MainActivity)?.requestNotificationPermission()
                         }
                     )

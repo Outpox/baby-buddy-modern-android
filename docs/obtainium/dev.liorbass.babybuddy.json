@@ -1,0 +1,15 @@
+{
+    "config": {
+        "id": "dev.liorbass.babybuddy",
+        "url": "https://github.com/liorbass/baby-buddy-modern-android",
+        "author": "liorbass",
+        "name": "Baby Buddy Companion"
+    },
+    "icon": "https://raw.githubusercontent.com/liorbass/baby-buddy-modern-android/main/fastlane/metadata/android/en-US/images/icon.png",
+    "categories": [
+        "sports_and_health"
+    ],
+    "description": {
+        "en": "Android client for a self-hosted Baby Buddy server: feeds with a shared nursing timer, sleep, diapers, pumping and growth, with widgets, reminders and offline sync."
+    }
+}

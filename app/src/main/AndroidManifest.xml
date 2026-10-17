@@ -31,7 +31,45 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Long-press on a Quick Settings tile opens its screen -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
         </activity>
+
+        <!-- Quick Settings tiles (widget/QuickTiles.kt) -->
+        <service
+            android:name=".widget.FeedTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_widget_feed"
+            android:label="@string/tile_feed_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".widget.SleepTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_widget_sleep"
+            android:label="@string/tile_sleep_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".widget.DiaperTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_widget_diaper"
+            android:label="@string/tile_diaper_name"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- Baby Buddy Home Screen App Widgets -->
         <receiver

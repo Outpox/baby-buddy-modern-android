@@ -2,7 +2,10 @@ package com.example
 
 import android.app.Application
 import com.example.data.repository.BabyBuddyRepository
+import com.example.widget.AppShortcuts
 import com.example.widget.FeedNotification
+import com.example.widget.NextUpNotification
+import com.example.widget.QuickTile
 import com.example.widget.Reminders
 import com.example.widget.SleepNotification
 import com.example.widget.TimerSyncService
@@ -94,6 +97,34 @@ class BabyBuddyApplication : Application() {
                 delay(500)
                 Reminders.schedule(this@BabyBuddyApplication)
             }
+        }
+        appScope.launch {
+            // What's next on the lock screen, while no feed or sleep notification is up
+            combine(
+                repository.nextUpTimes,
+                repository.nextUpNotification,
+                repository.liveTimerState.map { it.isRunning },
+                repository.sleepTimer.map { it.isRunning },
+                repository.feedNotificationEnabled
+            ) { next, enabled, feed, sleep, timers -> next to (enabled && !feed && !(sleep && timers)) }
+                .distinctUntilChanged()
+                .collect { (next, show) -> NextUpNotification.update(this@BabyBuddyApplication, next, show) }
+        }
+        appScope.launch {
+            // Quick Settings tiles follow the feed and sleep timers (and signing in or out)
+            combine(
+                repository.liveTimerState.map { listOf(it.isRunning, it.isPaused, it.activeBreast) },
+                repository.sleepTimer.map { it.startMillis },
+                repository.connectionConfig.map { it.isConnected }
+            ) { feed, sleep, signedIn -> Triple(feed, sleep, signedIn) }
+                .distinctUntilChanged()
+                .collect { QuickTile.refreshAll(this@BabyBuddyApplication) }
+        }
+        appScope.launch {
+            // Launcher shortcuts: only when signed in, and only for tracked items
+            combine(repository.connectionConfig.map { it.isConnected }, repository.hiddenItems) { signedIn, hidden -> signedIn to hidden }
+                .distinctUntilChanged()
+                .collect { (signedIn, hidden) -> AppShortcuts.update(this@BabyBuddyApplication, signedIn, hidden) }
         }
         appScope.launch {
             repository.widgetState.collectLatest {

@@ -1,0 +1,4 @@
+- Quick Settings tiles: Breastfeed (start/pause), Sleep (start/woke up) and Diaper
+- Launcher shortcuts: Feed left, Feed right, Diaper, Sleep now
+- "While you were away" on Today: what the other caregivers logged since you last had the app open
+- Optional "What's next" lock-screen notification counting down to the next feed, with the next diaper change and nap

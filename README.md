@@ -48,7 +48,9 @@ Built with Kotlin, Jetpack Compose and Material 3. Originally generated with Goo
 - **Sleep timer** — running timer kept on the phone (survives app restarts) or manual start/end entry for past sleeps.
 - **Log screen** — one list to log breastfeeding, bottle, diaper, sleep, pumping, bath and growth; tap an entry to open its form. Quick notes for your server's tags live on Today.
 - **Home-screen widgets** — three widgets: **Quick log** (one-tap feed/diaper/pump/tummy-time buttons), **Timer** (live self-ticking clock with side, pause and end controls) and **Summary** (today's counts at a glance), all driven straight from the app's state.
-- **Lock-screen notifications** — while a feed runs, an ongoing notification shows the live clock and Left/Right/End controls; a running sleep gets its own lock-screen timer notification. Both can be turned off in Settings.
+- **Lock-screen notifications** — while a feed runs, an ongoing notification shows the live clock and Left/Right/End controls; a running sleep gets its own lock-screen timer notification. Both can be turned off in Settings. Optionally, a silent "what's next" notification counts down to the next feed, diaper change or nap while no timer runs.
+- **Quick Settings tiles & shortcuts** — Breastfeed (start/pause), Sleep (start/woke up) and Diaper tiles for the pull-down shade, and long-press launcher shortcuts for Feed left, Feed right, Diaper and Sleep now.
+- **While you were away** — coming back to the app, Today lists the feeds, diapers and sleeps the other caregivers logged in the meantime.
 - **Reminders & notifications** — optional "feed due", "diaper change due", "awake for" and "asleep for" alarms with an optional heads-up 5–60 minutes before, which refresh from the server before posting, plus sync-status and undo toasts.
 - **Rhythm models (optional)** — fits a model per rhythm on the phone (AutoML over linear regression, boosted trees, a small neural net and nearest neighbours), shows how each compares with the default estimate, and can time the reminders, Today's "next" times and the summary widget. See [Rhythm models](#rhythm-models).
 - **Growth** — weight, length and head circumference, with each measurement's percentile and charts against the [WHO Child Growth Standards](https://www.who.int/tools/child-growth-standards) (birth to 2 years).
@@ -86,7 +88,11 @@ Add them from the launcher's widget list or from **Customize Today → Phone Hom
 - **Feeding** — while a feed runs: the active side, each side's time and the start time, with Left / Right (pause or switch) and End buttons, usable from the lock screen.
 - **Sleeping** — while a sleep is timed: when the baby fell asleep and a **Woke up** button that saves the sleep.
 
-Both can be turned off in Settings → Notifications.
+Both can be turned off in Settings → Notifications. There you can also turn on **What's next on lock screen**: a silent notification that counts down to the next feed, then lists the next diaper change and nap (from the reminder intervals or a saved [rhythm model](#rhythm-models)), shown while no feed or sleep is timed.
+
+### Quick Settings tiles and shortcuts
+
+Edit your Quick Settings panel to add **Breastfeed** (tap to start on the side opposite the last feed, tap again to pause or resume), **Sleep** (tap when asleep, again when awake; the sleep is saved) and **Diaper** (opens the diaper log). Long-press a tile to open its screen. Long-press the app icon for **Feed left**, **Feed right**, **Diaper** and **Sleep now**.
 
 ### Reminders
 
@@ -138,7 +144,11 @@ Predictions are estimates from past patterns, not advice; babies change quickly,
 
 ### Install
 
-Download the APK from the [latest release](https://github.com/liorbass/baby-buddy-modern-android/releases/latest) and open it on your phone (allow installing apps from your browser when Android asks). New releases install over the old one. To get updates automatically, add this repository to [Obtainium](https://github.com/ImranR98/Obtainium).
+Download the APK from the [latest release](https://github.com/liorbass/baby-buddy-modern-android/releases/latest) and open it on your phone (allow installing apps from your browser when Android asks). New releases install over the old one.
+
+To get updates automatically, install it with [Obtainium](https://github.com/ImranR98/Obtainium): tap the badge on your phone, or add this repository's URL in Obtainium. The app config is in [`docs/obtainium/`](docs/obtainium/dev.liorbass.babybuddy.json).
+
+<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22dev.liorbass.babybuddy%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fliorbass%2Fbaby-buddy-modern-android%22%2C%22author%22%3A%22liorbass%22%2C%22name%22%3A%22Baby%20Buddy%20Companion%22%7D"><img src="docs/images/badge_obtainium.png" alt="Get it on Obtainium" height="54"></a>
 
 From 1.1.0 the app ID is `dev.liorbass.babybuddy`; 1.0.x was a different app ID, so uninstall it after moving over (log in again once).
 

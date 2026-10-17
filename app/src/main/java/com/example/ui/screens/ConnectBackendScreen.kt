@@ -161,6 +161,8 @@ fun ConnectBackendScreen(
     onBabySexChange: (BabySex) -> Unit = {},
     feedNotificationEnabled: Boolean = true,
     onFeedNotificationChange: (Boolean) -> Unit = {},
+    nextUpNotification: Boolean = false,
+    onNextUpNotificationChange: (Boolean) -> Unit = {},
     use24h: Boolean = true,
     onUse24hChange: (Boolean) -> Unit = {},
     modelsTab: Boolean = false,
@@ -610,6 +612,7 @@ fun ConnectBackendScreen(
             title = "Notifications",
             summary = listOfNotNull(
                 "Lock-screen timers".takeIf { feedNotificationEnabled },
+                "what's next".takeIf { nextUpNotification },
                 "feed reminder".takeIf { reminders.feedAfterMinutes > 0 },
                 "awake reminder".takeIf { reminders.awakeAfterMinutes > 0 },
                 "sleep reminder".takeIf { reminders.sleepAfterMinutes > 0 },
@@ -625,6 +628,12 @@ fun ConnectBackendScreen(
                 description = "Feed Left/Right/End buttons and the sleep timer while they run",
                 checked = feedNotificationEnabled,
                 onChange = onFeedNotificationChange
+            )
+            SwitchSetting(
+                title = "What's next on lock screen",
+                description = "A silent notification with the next feed, diaper change and nap (from the reminders or a saved model) while no timer runs",
+                checked = nextUpNotification,
+                onChange = onNextUpNotificationChange
             )
             if (TrackedItem.BREASTFEEDING !in hiddenItems || TrackedItem.BOTTLE !in hiddenItems) {
                 SwitchSetting(

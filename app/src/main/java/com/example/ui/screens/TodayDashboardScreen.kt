@@ -76,6 +76,7 @@ import com.example.data.model.FeedType
 import com.example.data.model.FeedingEvent
 import com.example.data.model.GrowthEvent
 import com.example.data.model.GrowthKind
+import com.example.data.model.HandoffSummary
 import com.example.data.model.LiveTimerState
 import com.example.data.model.MILK_STASH_TAG
 import com.example.data.model.NoteEvent
@@ -124,6 +125,8 @@ fun TodayDashboardScreen(
     liveTimerState: LiveTimerState,
     connectionConfig: ServerConnectionConfig,
     recentFeedings: List<FeedingEvent>,
+    handoff: HandoffSummary? = null, // what other caregivers logged while this phone was away
+    onDismissHandoff: () -> Unit = {},
     recentDiapers: List<DiaperEvent> = emptyList(),
     recentTummyTimes: List<TummyTimeEvent> = emptyList(),
     recentPumpings: List<PumpingEvent> = emptyList(),
@@ -340,6 +343,12 @@ fun TodayDashboardScreen(
                 }
             }
 
+            if (handoff != null) {
+                item(key = "handoff") {
+                    HandoffCard(summary = handoff, onOpen = { onOpenHistory(HistoryFilter.ALL) }, onDismiss = onDismissHandoff)
+                }
+            }
+
             // Cards (Customize Today), side by side when both are on
             fun cardOn(type: DashboardWidgetType) = dashboardWidgets.any { it.type == type && it.isEnabled }
             val showLastFeed = feedingShown && cardOn(DashboardWidgetType.LAST_FEED)
@@ -549,6 +558,86 @@ private fun SleepingBanner(startMillis: Long, onClick: () -> Unit) {
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
+        }
+    }
+}
+
+/** "While you were away": the feeds, changes and sleeps other caregivers logged since this phone left the app. */
+@Composable
+private fun HandoffCard(summary: HandoffSummary, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    class Line(val at: Long, val item: TrackedItem, val text: String, val who: String?)
+    val lines = (
+        summary.feedings.map { f ->
+            val text = when (f.type) {
+                FeedType.NURSING -> listOfNotNull(
+                    "Breastfeed",
+                    "L ${formatMinutes(f.leftDurationMinutes)}".takeIf { f.leftDurationSec > 0 },
+                    "R ${formatMinutes(f.rightDurationMinutes)}".takeIf { f.rightDurationSec > 0 }
+                ).joinToString(" · ")
+
+                FeedType.BOTTLE -> listOfNotNull("Bottle", f.amountMl?.let { "$it ml" }, if (f.bottleFormula) "formula" else "breast milk").joinToString(" · ")
+
+                FeedType.SOLID -> "Solid food"
+            }
+            Line(f.timeMillis, if (f.type == FeedType.NURSING) TrackedItem.BREASTFEEDING else TrackedItem.BOTTLE, text, f.caregiver)
+        } +
+            summary.diapers.map { d ->
+                val kind = when (d.type) {
+                    DiaperType.WET -> "wet"
+                    DiaperType.DIRTY -> "dirty"
+                    DiaperType.BOTH -> "wet + dirty"
+                    DiaperType.DRY -> "dry"
+                }
+                Line(d.timeMillis, TrackedItem.DIAPERS, "Diaper · $kind", d.caregiver)
+            } +
+            summary.sleeps.map { s ->
+                Line(s.timeMillis, TrackedItem.SLEEP, "${if (s.isNap) "Nap" else "Sleep"} · ${formatMinutes(s.durationMinutes)}", s.caregiver)
+            }
+        ).sortedBy { it.at }
+    val shown = 6
+    Card(
+        onClick = onOpen,
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceContainerLow),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 4.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f).padding(top = 8.dp)) {
+                    Text("While you were away", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        listOfNotNull(
+                            "Since ${dayAndTime(summary.sinceMillis, TimeFormat.clock(summary.sinceMillis))}",
+                            summary.caregivers.takeIf { it.isNotEmpty() }?.joinToString(", ")
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OutlineColor
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = OutlineColor)
+                }
+            }
+            lines.take(shown).forEach { line ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(ItemColors.tint(line.item))
+                    )
+                    Text(
+                        TimeFormat.clock(line.at),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(start = 10.dp).width(64.dp)
+                    )
+                    Text(line.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    line.who?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = OutlineColor) }
+                }
+            }
+            if (lines.size > shown) {
+                Text("+${lines.size - shown} more in History", style = MaterialTheme.typography.bodySmall, color = OutlineColor)
+            }
         }
     }
 }
