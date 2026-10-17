@@ -52,6 +52,7 @@ import com.example.ui.screens.DiaperLogScreen
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.NursingTimerScreen
 import com.example.ui.screens.QuickLogModal
+import com.example.ui.screens.RhythmModelsTab
 import com.example.ui.screens.SleepScreen
 import com.example.ui.screens.TodayDashboardScreen
 import com.example.ui.screens.TrendsScreen
@@ -117,7 +118,7 @@ class MainActivity : ComponentActivity() {
         }
         // Lock-screen timers and reminders both need it; asked again if it was turned off later
         val reminders = mainViewModel.reminders.value
-        val remindersOn = reminders.feedAfterMinutes > 0 || reminders.awakeAfterMinutes > 0 || reminders.sleepAfterMinutes > 0
+        val remindersOn = reminders.anyOn
         if (mainViewModel.feedNotificationEnabled.value || remindersOn) requestNotificationPermission()
     }
 
@@ -200,6 +201,8 @@ fun BabyBuddyApp(
     val caregiverName by viewModel.caregiverName.collectAsState()
     val feedNotificationEnabled by viewModel.feedNotificationEnabled.collectAsState()
     val use24h by viewModel.use24h.collectAsState()
+    val modelsTab by viewModel.modelsTab.collectAsState()
+    val modelsState by viewModel.modelsState.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val noteTags by viewModel.noteTags.collectAsState()
     val milkStash by viewModel.milkStash.collectAsState()
@@ -326,7 +329,12 @@ fun BabyBuddyApp(
                         growth = growth,
                         birthDate = babyProfile.birthDate,
                         babySex = babySex,
-                        onBabySexChange = { viewModel.setBabySex(it) }
+                        onBabySexChange = { viewModel.setBabySex(it) },
+                        modelsTab = if (modelsTab) {
+                            { RhythmModelsTab(state = modelsState, onTrain = { viewModel.trainModels(it) }, hiddenItems = hiddenItems) }
+                        } else {
+                            null
+                        }
                     )
                 }
 
@@ -498,11 +506,13 @@ fun BabyBuddyApp(
                         reminders = reminders,
                         onRemindersChange = { settings ->
                             viewModel.setReminders(settings)
-                            if (settings.feedAfterMinutes > 0 || settings.awakeAfterMinutes > 0 || settings.sleepAfterMinutes > 0) {
+                            if (settings.anyOn) {
                                 (context as? MainActivity)?.requestNotificationPermission()
                             }
                         },
                         onUse24hChange = { viewModel.setUse24h(it) },
+                        modelsTab = modelsTab,
+                        onModelsTabChange = { viewModel.setModelsTab(it) },
                         onFeedNotificationChange = { enabled ->
                             viewModel.setFeedNotificationEnabled(enabled)
                             if (enabled) (context as? MainActivity)?.requestNotificationPermission()

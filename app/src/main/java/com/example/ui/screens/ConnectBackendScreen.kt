@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -146,6 +148,8 @@ fun ConnectBackendScreen(
     onFeedNotificationChange: (Boolean) -> Unit = {},
     use24h: Boolean = true,
     onUse24hChange: (Boolean) -> Unit = {},
+    modelsTab: Boolean = false,
+    onModelsTabChange: (Boolean) -> Unit = {},
     themeMode: ThemeMode = ThemeMode.BY_TIME,
     onThemeModeChange: (ThemeMode) -> Unit = {},
     reminders: ReminderSettings = ReminderSettings(),
@@ -516,6 +520,12 @@ fun ConnectBackendScreen(
                 checked = use24h,
                 onChange = onUse24hChange
             )
+            SwitchSetting(
+                title = "Models tab in Trends",
+                description = "Fits a model to each rhythm on this phone and predicts the next feed, change, nap and wake-up",
+                checked = modelsTab,
+                onChange = onModelsTabChange
+            )
         }
 
         SettingsSection(
@@ -524,7 +534,8 @@ fun ConnectBackendScreen(
                 "Lock-screen timers".takeIf { feedNotificationEnabled },
                 "feed reminder".takeIf { reminders.feedAfterMinutes > 0 },
                 "awake reminder".takeIf { reminders.awakeAfterMinutes > 0 },
-                "sleep reminder".takeIf { reminders.sleepAfterMinutes > 0 }
+                "sleep reminder".takeIf { reminders.sleepAfterMinutes > 0 },
+                "diaper reminder".takeIf { reminders.diaperAfterMinutes > 0 }
             ).joinToString(" · ").replaceFirstChar(Char::uppercase).ifBlank { "Off" },
             icon = Icons.Default.Notifications,
             expanded = openSection == "notifications",
@@ -597,8 +608,53 @@ fun ConnectBackendScreen(
                     dialogNote = "Time asleep, counted from the start of the sleep timer (hh:mm)"
                 )
             }
+            if (TrackedItem.DIAPERS !in hiddenItems) {
+                SwitchSetting(
+                    title = "Diaper reminder",
+                    description = if (reminders.diaperAfterMinutes > 0) {
+                        "When ${formatMinutes(reminders.diaperAfterMinutes)} have passed since the last change"
+                    } else {
+                        "Notify when the next diaper change is due"
+                    },
+                    checked = reminders.diaperAfterMinutes > 0,
+                    onChange = { on -> onRemindersChange(reminders.copy(diaperAfterMinutes = if (on) 180 else 0)) }
+                )
+            }
+            if (reminders.diaperAfterMinutes > 0 && TrackedItem.DIAPERS !in hiddenItems) {
+                DurationField(
+                    label = "Remind after",
+                    minutes = reminders.diaperAfterMinutes,
+                    onChange = { onRemindersChange(reminders.copy(diaperAfterMinutes = it)) },
+                    dialogNote = "Time since the last diaper change (hh:mm)"
+                )
+            }
+            if (reminders.anyOn) {
+                Text(
+                    "Heads-up before",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (reminders.earlyMinutes > 0) {
+                        "Also notify ${formatMinutes(reminders.earlyMinutes)} before each reminder is due"
+                    } else {
+                        "Only when a reminder is due"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0, 5, 10, 15, 20, 30, 45, 60).forEach { minutes ->
+                        FilterChip(
+                            selected = reminders.earlyMinutes == minutes,
+                            onClick = { onRemindersChange(reminders.copy(earlyMinutes = minutes)) },
+                            label = { Text(if (minutes == 0) "Off" else formatMinutes(minutes)) }
+                        )
+                    }
+                }
+            }
             Text(
-                "Reminders check the server first, so a feed or sleep logged on another phone counts.",
+                "Reminders check the server first, so a feed, change or sleep logged on another phone counts.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

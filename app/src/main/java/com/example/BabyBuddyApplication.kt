@@ -65,9 +65,9 @@ class BabyBuddyApplication : Application() {
                 .collect { (feed, sleep, enabled) -> TimerSyncService.sync(this@BabyBuddyApplication, feed || sleep, enabled) }
         }
         appScope.launch {
-            // Feed-due / awake reminders follow every feed, sleep and settings change, from any phone
+            // Feed / diaper / awake / sleep reminders follow every feed, change, sleep and settings change, from any phone
             combine(
-                combine(repository.reminders, repository.hiddenItems) { r, h -> r to h },
+                combine(repository.reminders, repository.hiddenItems, repository.lastDiaper.map { it?.timeMillis }) { r, h, d -> Triple(r, h, d) },
                 repository.lastFeedMillis,
                 repository.lastSleepEndMillis,
                 repository.sleepTimer.map { it.startMillis }, // a sleep starting/ending, or its start edited

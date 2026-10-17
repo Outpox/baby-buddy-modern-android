@@ -51,6 +51,10 @@ import com.example.ui.theme.OnSurfaceVariant
 import com.example.ui.theme.PrimaryColor
 import com.example.ui.theme.PrimaryFixed
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+import java.util.TimeZone
 
 private val WHEEL_ROW_HEIGHT = 44.dp
 private const val WHEEL_VISIBLE_ROWS = 5
@@ -100,7 +104,8 @@ fun WheelPicker(
         reported = centered
         latestOnSelected(centered % count, laps)
     }
-    LaunchedEffect(value, count) {
+    // Also once a scroll ends, in case the value was changed (e.g. clamped) while it ran
+    LaunchedEffect(value, count, state.isScrollInProgress) {
         if (count == 0 || state.isScrollInProgress || value.coerceIn(0, last) == centered % count) return@LaunchedEffect
         // The nearest row showing the new value (across a lap boundary on a cyclic wheel)
         val target = if (cyclic) {
@@ -189,37 +194,99 @@ fun InputModeToggle(modifier: Modifier = Modifier) {
     }
 }
 
+// How far the date wheel reaches back and ahead of today
+private const val DATE_DAYS_BACK = 730
+private const val DATE_DAYS_AHEAD = 7
+private const val DAY_MS = 24 * 60 * 60_000L
+
+/** Days since the epoch in the phone's time zone. */
+private fun localDay(millis: Long): Long = Math.floorDiv(millis + TimeZone.getDefault().getOffset(millis), DAY_MS)
+
 /**
- * A clock time (24h or 12h per Settings) as wheels or the keyboard field, with a switch between them.
- * The wheels go round: minutes past 59 or before 00 move the hour, and the hour past midnight moves the
- * day; [onChange] gets that as [dayShift] (-1 for 00:00 → 23:59, +1 for 23:59 → 00:00).
+ * A moment as date | hour : minute (and AM/PM in 12h) wheels, or the keyboard field, with a switch between them.
+ * The wheels are one continuous time: minutes going round move the hour, the hour going round moves the date,
+ * and the date wheel runs across months and years (two years back to a week ahead). [onChange] gets the new
+ * moment, to the minute. Typing sets just the clock time; [fromTyped] turns it into a moment.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ClockTimeEntry(hour: Int, minute: Int, onChange: (hour: Int, minute: Int, dayShift: Int) -> Unit, modifier: Modifier = Modifier) {
-    // Moves the time by whole hours, carrying past midnight into the day
-    fun setTime(newMinute: Int, hourSteps: Int, baseHour: Int = hour) {
-        val h = baseHour + hourSteps
-        onChange(Math.floorMod(h, 24), newMinute, Math.floorDiv(h, 24))
-    }
+fun ClockTimeEntry(millis: Long, onChange: (Long) -> Unit, fromTyped: (hour: Int, minute: Int) -> Long, modifier: Modifier = Modifier) {
+    val cal = Calendar.getInstance().apply { timeInMillis = millis }
+    val hour = cal.get(Calendar.HOUR_OF_DAY)
+    val minute = cal.get(Calendar.MINUTE)
     Column(modifier = modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         if (TimeFormat.useWheel) {
+            val today = remember { localDay(System.currentTimeMillis()) }
+            val dateLabel = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
+            val yearLabel = remember { SimpleDateFormat("d MMM yyyy", Locale.getDefault()) }
+            val thisYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
+
+            // Changes the moment, carrying over into larger units; seconds are dropped once anything changes
+            fun change(edit: Calendar.() -> Unit) {
+                val next = Calendar.getInstance().apply {
+                    timeInMillis = millis
+                    edit()
+                }
+                if (next.get(Calendar.MINUTE) != minute || next.get(Calendar.HOUR_OF_DAY) != hour || localDay(next.timeInMillis) != localDay(millis)) {
+                    next.set(Calendar.SECOND, 0)
+                    next.set(Calendar.MILLISECOND, 0)
+                    onChange(next.timeInMillis)
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                WheelPicker(
+                    count = DATE_DAYS_BACK + DATE_DAYS_AHEAD + 1,
+                    value = (localDay(millis) - today + DATE_DAYS_BACK).toInt(),
+                    label = { i ->
+                        val offset = i - DATE_DAYS_BACK
+                        when (offset) {
+                            0 -> "Today"
+
+                            -1 -> "Yesterday"
+
+                            1 -> "Tomorrow"
+
+                            else -> {
+                                val day = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, offset) }
+                                (if (day.get(Calendar.YEAR) == thisYear) dateLabel else yearLabel).format(day.time)
+                            }
+                        }
+                    },
+                    onSelected = { i, _ ->
+                        change {
+                            val day = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, i - DATE_DAYS_BACK) }
+                            set(day.get(Calendar.YEAR), day.get(Calendar.MONTH), day.get(Calendar.DAY_OF_MONTH))
+                        }
+                    },
+                    width = 128.dp
+                )
                 if (TimeFormat.use24h) {
                     WheelPicker(
                         count = 24,
                         value = hour,
                         label = { "%02d".format(it) },
-                        onSelected = { h, laps -> setTime(minute, laps * 24, baseHour = h) },
+                        onSelected = { h, laps ->
+                            change {
+                                set(Calendar.HOUR_OF_DAY, h)
+                                add(Calendar.DAY_OF_YEAR, laps)
+                            }
+                        },
+                        width = 56.dp,
                         cyclic = true
                     )
                 } else {
-                    // 12, 1 … 11 and AM/PM; going round from 11 to 12 flips AM/PM (and past midnight, the day)
+                    // 12, 1 … 11 and AM/PM; going round from 11 to 12 flips AM/PM (and past midnight, the date)
                     WheelPicker(
                         count = 12,
                         value = hour % 12,
                         label = { if (it == 0) "12" else "$it" },
-                        onSelected = { h, laps -> setTime(minute, laps * 12, baseHour = h + if (hour >= 12) 12 else 0) },
+                        onSelected = { h, laps ->
+                            change {
+                                set(Calendar.HOUR_OF_DAY, h + if (hour >= 12) 12 else 0)
+                                add(Calendar.HOUR_OF_DAY, laps * 12)
+                            }
+                        },
+                        width = 56.dp,
                         cyclic = true
                     )
                 }
@@ -228,7 +295,13 @@ fun ClockTimeEntry(hour: Int, minute: Int, onChange: (hour: Int, minute: Int, da
                     count = 60,
                     value = minute,
                     label = { "%02d".format(it) },
-                    onSelected = { m, laps -> setTime(m, laps) },
+                    onSelected = { m, laps ->
+                        change {
+                            set(Calendar.MINUTE, m)
+                            add(Calendar.HOUR_OF_DAY, laps)
+                        }
+                    },
+                    width = 56.dp,
                     cyclic = true
                 )
                 if (!TimeFormat.use24h) {
@@ -236,14 +309,17 @@ fun ClockTimeEntry(hour: Int, minute: Int, onChange: (hour: Int, minute: Int, da
                         count = 2,
                         value = if (hour >= 12) 1 else 0,
                         label = { if (it == 0) "AM" else "PM" },
-                        onSelected = { half, _ -> onChange(hour % 12 + half * 12, minute, 0) },
-                        modifier = Modifier.padding(start = 8.dp)
+                        onSelected = { half, _ -> change { set(Calendar.HOUR_OF_DAY, hour % 12 + half * 12) } },
+                        modifier = Modifier.padding(start = 4.dp),
+                        width = 56.dp
                     )
                 }
             }
         } else {
             val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = TimeFormat.use24h)
-            LaunchedEffect(state.hour, state.minute) { onChange(state.hour, state.minute, 0) }
+            LaunchedEffect(state.hour, state.minute) {
+                if (state.hour != hour || state.minute != minute) onChange(fromTyped(state.hour, state.minute))
+            }
             TimeInput(state = state)
         }
         InputModeToggle()

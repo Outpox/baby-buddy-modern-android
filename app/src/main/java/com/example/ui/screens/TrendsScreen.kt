@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,8 +104,10 @@ fun TrendsScreen(
     growth: List<GrowthEvent> = emptyList(),
     birthDate: String? = null,
     babySex: BabySex? = null,
-    onBabySexChange: (BabySex) -> Unit = {}
+    onBabySexChange: (BabySex) -> Unit = {},
+    modelsTab: (@Composable () -> Unit)? = null // the Models tab's content, when turned on in Settings
 ) {
+    var showModels by rememberSaveable { mutableStateOf(false) }
     val feedingShown = TrackedItem.BREASTFEEDING !in hiddenItems || TrackedItem.BOTTLE !in hiddenItems
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -119,61 +122,70 @@ fun TrendsScreen(
                     fontWeight = FontWeight.Bold,
                     color = OnSurface
                 )
-                RangeSelector(selected = rangeDays, onSelect = onSelectRange)
-            }
-        }
-
-        when {
-            error != null -> item {
-                ErrorCard(message = error, onRetry = onRetry, onConnect = onConnect)
-            }
-
-            isLoading || days == null -> item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(240.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = PrimaryColor)
+                if (modelsTab != null) {
+                    Segmented(options = listOf("Charts", "Models"), selected = if (showModels) 1 else 0, onSelect = { showModels = it == 1 })
                 }
-            }
-
-            days.isEmpty() -> item {
-                Text(
-                    text = "No data for this period.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = OnSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 48.dp),
-                    textAlign = TextAlign.Center
-                )
-            }
-
-            else -> {
-                if (feedingShown) {
-                    item { FeedingRhythmSection(days = days, rangeDays = rangeDays) }
-                }
-                if (TrackedItem.SLEEP !in hiddenItems && days.any { it.sleepMarks.isNotEmpty() }) {
-                    item { SleepRhythmSection(days = days, rangeDays = rangeDays) }
-                }
-                if (TrackedItem.DIAPERS !in hiddenItems && days.any { it.diaperMarks.isNotEmpty() }) {
-                    item { DiaperRhythmSection(days = days) }
-                }
-                item { DailyNumbersSection(days = days, hidden = hiddenItems) }
-                val leftTotal = days.sumOf { it.leftMinutes.coerceAtLeast(0) }
-                val rightTotal = days.sumOf { it.rightMinutes.coerceAtLeast(0) }
-                if (leftTotal + rightTotal > 0 && TrackedItem.BREASTFEEDING !in hiddenItems) {
-                    item { LeftRightSection(leftMinutes = leftTotal, rightMinutes = rightTotal) }
+                if (!showModels || modelsTab == null) {
+                    RangeSelector(selected = rangeDays, onSelect = onSelectRange)
                 }
             }
         }
 
-        // By age, not by the selected range, so it shows whatever the range or loading state
-        if (TrackedItem.GROWTH !in hiddenItems) {
-            item(key = "growth") {
-                GrowthSection(growth = growth, birthDate = birthDate, sex = babySex, onSexChange = onBabySexChange)
+        if (showModels && modelsTab != null) {
+            item(key = "models") { modelsTab() }
+        } else {
+            when {
+                error != null -> item {
+                    ErrorCard(message = error, onRetry = onRetry, onConnect = onConnect)
+                }
+
+                isLoading || days == null -> item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = PrimaryColor)
+                    }
+                }
+
+                days.isEmpty() -> item {
+                    Text(
+                        text = "No data for this period.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = OnSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                else -> {
+                    if (feedingShown) {
+                        item { FeedingRhythmSection(days = days, rangeDays = rangeDays) }
+                    }
+                    if (TrackedItem.SLEEP !in hiddenItems && days.any { it.sleepMarks.isNotEmpty() }) {
+                        item { SleepRhythmSection(days = days, rangeDays = rangeDays) }
+                    }
+                    if (TrackedItem.DIAPERS !in hiddenItems && days.any { it.diaperMarks.isNotEmpty() }) {
+                        item { DiaperRhythmSection(days = days) }
+                    }
+                    item { DailyNumbersSection(days = days, hidden = hiddenItems) }
+                    val leftTotal = days.sumOf { it.leftMinutes.coerceAtLeast(0) }
+                    val rightTotal = days.sumOf { it.rightMinutes.coerceAtLeast(0) }
+                    if (leftTotal + rightTotal > 0 && TrackedItem.BREASTFEEDING !in hiddenItems) {
+                        item { LeftRightSection(leftMinutes = leftTotal, rightMinutes = rightTotal) }
+                    }
+                }
+            }
+
+            // By age, not by the selected range, so it shows whatever the range or loading state
+            if (TrackedItem.GROWTH !in hiddenItems) {
+                item(key = "growth") {
+                    GrowthSection(growth = growth, birthDate = birthDate, sex = babySex, onSexChange = onBabySexChange)
+                }
             }
         }
     }
@@ -185,6 +197,12 @@ fun TrendsScreen(
 
 @Composable
 private fun RangeSelector(selected: Int, onSelect: (Int) -> Unit) {
+    val options = listOf(7, 30)
+    Segmented(options = options.map { "$it days" }, selected = options.indexOf(selected), onSelect = { onSelect(options[it]) })
+}
+
+@Composable
+private fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -192,19 +210,19 @@ private fun RangeSelector(selected: Int, onSelect: (Int) -> Unit) {
             .background(SurfaceContainerLow)
             .padding(4.dp)
     ) {
-        listOf(7, 30).forEach { option ->
-            val isSelected = option == selected
+        options.forEachIndexed { index, option ->
+            val isSelected = index == selected
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(50))
                     .background(if (isSelected) PrimaryColor else Color.Transparent)
-                    .clickable { if (!isSelected) onSelect(option) }
+                    .clickable { if (!isSelected) onSelect(index) }
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "$option days",
+                    text = option,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (isSelected) OnPrimary else OnSurfaceVariant

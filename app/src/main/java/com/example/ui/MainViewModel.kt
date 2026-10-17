@@ -3,6 +3,9 @@ package com.example.ui
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.ml.RhythmModel
+import com.example.data.ml.RhythmTarget
+import com.example.data.ml.trainRhythmModels
 import com.example.data.model.BATH_TAG
 import com.example.data.model.BabyProfile
 import com.example.data.model.BabySex
@@ -39,6 +42,7 @@ import com.example.widget.BabyBuddyQuickLogWidget
 import com.example.widget.BabyBuddySummaryWidget
 import com.example.widget.BabyBuddyTimerWidget
 import com.example.widget.WidgetManagerHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,6 +54,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class ScreenDestination {
     TODAY_DASHBOARD,
@@ -212,6 +217,43 @@ class MainViewModel(
                 .onSuccess { _trendsDays.value = it }
                 .onFailure { _trendsError.value = it.localizedMessage ?: "Couldn't load trends" }
             _trendsLoading.value = false
+        }
+    }
+
+    // Trends → Models: rhythm models trained on the phone from the last [modelsDays] days
+    val modelsTab: StateFlow<Boolean> = repository.modelsTab
+
+    fun setModelsTab(enabled: Boolean) = repository.setModelsTab(enabled)
+
+    sealed interface ModelsState {
+        data object Idle : ModelsState
+
+        data class Training(val step: String, val progress: Float) : ModelsState
+
+        data class Ready(val models: List<RhythmModel>, val days: Int, val trainedAt: Long) : ModelsState
+
+        data class Failed(val message: String) : ModelsState
+    }
+
+    private val _modelsState = MutableStateFlow<ModelsState>(ModelsState.Idle)
+    val modelsState: StateFlow<ModelsState> = _modelsState.asStateFlow()
+    private var modelsJob: Job? = null
+
+    fun trainModels(days: Int) {
+        modelsJob?.cancel()
+        modelsJob = viewModelScope.launch {
+            _modelsState.value = ModelsState.Training("Loading $days days of entries", 0f)
+            val events = repository.loadRhythmEvents(days, repository.babyProfile.value.birthDate).getOrElse {
+                _modelsState.value = ModelsState.Failed(it.localizedMessage ?: "Couldn't load entries")
+                return@launch
+            }
+            val targets = RhythmTarget.entries.size
+            val models = withContext(Dispatchers.Default) {
+                trainRhythmModels(events) { target, fraction ->
+                    _modelsState.value = ModelsState.Training("Fitting ${target.title.lowercase()}", (target.ordinal + fraction) / targets)
+                }
+            }
+            _modelsState.value = ModelsState.Ready(models, days, System.currentTimeMillis())
         }
     }
 

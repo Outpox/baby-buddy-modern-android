@@ -195,8 +195,12 @@ data class NoteTag(val name: String, val color: String? = null, val lastUsedMill
 data class ReminderSettings(
     val feedAfterMinutes: Int = 0, // remind when this long has passed since the last feed started
     val awakeAfterMinutes: Int = 0, // remind when the baby has been awake this long
-    val sleepAfterMinutes: Int = 0 // remind when a timed sleep has lasted this long
-)
+    val sleepAfterMinutes: Int = 0, // remind when a timed sleep has lasted this long
+    val diaperAfterMinutes: Int = 0, // remind when this long has passed since the last diaper change
+    val earlyMinutes: Int = 0 // also a heads-up this long before each reminder is due; 0 = none
+) {
+    val anyOn: Boolean get() = feedAfterMinutes > 0 || awakeAfterMinutes > 0 || sleepAfterMinutes > 0 || diaperAfterMinutes > 0
+}
 
 /** What this phone tracks (Settings → Tracked items); a hidden item disappears everywhere in the app. */
 enum class TrackedItem(val label: String, val description: String) {

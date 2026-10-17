@@ -43,6 +43,7 @@ import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -340,7 +341,7 @@ fun EditBathDialog(bath: NoteEvent, onDismiss: () -> Unit, onSave: (NoteEvent) -
     DialogFrame(onDismiss = onDismiss) {
         DialogTitle("Edit bath")
         Spacer(Modifier.height(16.dp))
-        TimeField(label = "Time", millis = time, onChange = { time = it }, resolve = { h, m -> withTime(bath.timeMillis, h, m) })
+        TimeField(label = "Time", millis = time, onChange = { time = it }, keepDay = true)
         Spacer(Modifier.height(16.dp))
         NotesField(value = notes, onChange = { notes = it })
         Spacer(Modifier.height(20.dp))
@@ -363,7 +364,7 @@ fun EditNoteDialog(note: NoteEvent, onDismiss: () -> Unit, onSave: (NoteEvent) -
             Text(note.tags.joinToString("  ") { "#$it" }, style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
         }
         Spacer(Modifier.height(16.dp))
-        TimeField(label = "Time", millis = time, onChange = { time = it }, resolve = { h, m -> withTime(note.timeMillis, h, m) })
+        TimeField(label = "Time", millis = time, onChange = { time = it }, keepDay = true)
         Spacer(Modifier.height(16.dp))
         NotesField(value = text, onChange = { text = it })
         Spacer(Modifier.height(20.dp))
@@ -406,10 +407,10 @@ fun SideDurationDialog(sideLabel: String, initialSeconds: Int, onDismiss: () -> 
 }
 
 /**
- * Pick a clock time; the result is the latest such moment that isn't in the future, or [resolve]'s
- * (which places it on a given day) moved by the days the wheels went round midnight (00:00 back to 23:59 = the day before).
+ * Pick a moment. The wheels set date and time together (minutes going round move the hour, and so on into the
+ * date). A typed time is the latest such moment that isn't in the future, or with [keepDay] stays on the day
+ * already picked (editing an entry).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimePickDialog(
     title: String,
@@ -417,20 +418,9 @@ fun TimePickDialog(
     onDismiss: () -> Unit,
     onSave: (Long) -> Unit,
     note: String? = null,
-    resolve: ((hour: Int, minute: Int) -> Long)? = null
+    keepDay: Boolean = false
 ) {
-    val cal = remember(initialMillis) { Calendar.getInstance().apply { timeInMillis = initialMillis } }
-    var hour by remember { mutableIntStateOf(cal.get(Calendar.HOUR_OF_DAY)) }
-    var minute by remember { mutableIntStateOf(cal.get(Calendar.MINUTE)) }
-    var dayShift by remember { mutableIntStateOf(0) }
-    fun result(): Long = if (resolve == null) {
-        TimeFormat.latestAt(hour, minute)
-    } else {
-        Calendar.getInstance().apply {
-            timeInMillis = resolve(hour, minute)
-            add(Calendar.DAY_OF_YEAR, dayShift)
-        }.timeInMillis
-    }
+    var picked by remember { mutableLongStateOf(initialMillis) }
     DialogFrame(onDismiss = onDismiss) {
         DialogTitle(title)
         if (note != null) {
@@ -438,15 +428,14 @@ fun TimePickDialog(
             Text(note, style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
         }
         Spacer(Modifier.height(16.dp))
-        ClockTimeEntry(hour = hour, minute = minute, onChange = { h, m, days ->
-            hour = h
-            minute = m
-            dayShift += days
-        })
-        // Which day it lands on, once that isn't today
-        val picked = result()
+        ClockTimeEntry(
+            millis = picked,
+            onChange = { picked = it },
+            fromTyped = { h, m -> if (keepDay) withTime(picked, h, m) else TimeFormat.latestAt(h, m) }
+        )
+        // Typing has no date wheel: say which day it lands on, once that isn't today
         val day = dayAndTime(picked, TimeFormat.clock(picked))
-        if (day != TimeFormat.clock(picked)) {
+        if (!TimeFormat.useWheel && day != TimeFormat.clock(picked)) {
             Text(
                 day,
                 style = MaterialTheme.typography.bodyMedium,
@@ -456,13 +445,7 @@ fun TimePickDialog(
             )
         }
         Spacer(Modifier.height(8.dp))
-        CancelSaveRow(
-            onCancel = onDismiss,
-            onSave = {
-                val unchanged = hour == cal.get(Calendar.HOUR_OF_DAY) && minute == cal.get(Calendar.MINUTE) && dayShift == 0
-                onSave(if (unchanged) initialMillis else result())
-            }
-        )
+        CancelSaveRow(onCancel = onDismiss, onSave = { onSave(picked) })
     }
 }
 
@@ -475,7 +458,7 @@ fun TimeField(
     modifier: Modifier = Modifier,
     valueText: String? = null,
     dialogNote: String? = null,
-    resolve: ((hour: Int, minute: Int) -> Long)? = null
+    keepDay: Boolean = false
 ) {
     var picking by remember { mutableStateOf(false) }
     if (picking) {
@@ -483,7 +466,7 @@ fun TimeField(
             title = label,
             initialMillis = millis,
             note = dialogNote,
-            resolve = resolve,
+            keepDay = keepDay,
             onDismiss = { picking = false },
             onSave = {
                 picking = false
@@ -829,9 +812,9 @@ fun EditSleepDialog(sleep: SleepEvent, onDismiss: () -> Unit, onSave: (SleepEven
         DialogTitle("Edit sleep")
         Spacer(Modifier.height(16.dp))
         // Keep the entry's own dates (it may be from earlier in the week)
-        TimeField(label = "Fell asleep", millis = start, onChange = { start = it }, resolve = { h, m -> withTime(sleep.timeMillis, h, m) })
+        TimeField(label = "Fell asleep", millis = start, onChange = { start = it }, keepDay = true)
         Spacer(Modifier.height(8.dp))
-        TimeField(label = "Woke up", millis = end, onChange = { end = it }, resolve = { h, m -> withTime(sleep.endMillis, h, m) })
+        TimeField(label = "Woke up", millis = end, onChange = { end = it }, keepDay = true)
         Spacer(Modifier.height(8.dp))
         Text(
             "Slept ${formatMinutes(((end - fixedStart) / 60_000L).toInt())}",
@@ -944,7 +927,7 @@ fun EditFeedingDialog(feeding: FeedingEvent, onDismiss: () -> Unit, onSave: (Fee
         DialogTitle("Edit feeding")
         Spacer(Modifier.height(16.dp))
         // Keeps the entry's own date (it may be from earlier in the week)
-        TimeField(label = "Time", millis = time, onChange = { time = it }, resolve = { h, m -> withTime(feeding.timeMillis, h, m) })
+        TimeField(label = "Time", millis = time, onChange = { time = it }, keepDay = true)
         Spacer(Modifier.height(16.dp))
 
         if (isBottle) {
@@ -1036,7 +1019,7 @@ fun EditDiaperDialog(diaper: DiaperEvent, onDismiss: () -> Unit, onSave: (Diaper
         DialogTitle("Edit diaper")
         Spacer(Modifier.height(16.dp))
         // Keeps the entry's own date (it may be from earlier in the week)
-        TimeField(label = "Time", millis = time, onChange = { time = it }, resolve = { h, m -> withTime(diaper.timeMillis, h, m) })
+        TimeField(label = "Time", millis = time, onChange = { time = it }, keepDay = true)
         Spacer(Modifier.height(16.dp))
 
         SegmentedToggle(
@@ -1109,7 +1092,7 @@ fun EditTummyTimeDialog(tummyTime: TummyTimeEvent, onDismiss: () -> Unit, onSave
         DialogTitle("Edit tummy time")
         Spacer(Modifier.height(16.dp))
         // Keeps the entry's own date (it may be from earlier in the week)
-        TimeField(label = "Time", millis = time, onChange = { time = it }, resolve = { h, m -> withTime(tummyTime.timeMillis, h, m) })
+        TimeField(label = "Time", millis = time, onChange = { time = it }, keepDay = true)
         Spacer(Modifier.height(16.dp))
 
         MinuteStepper(
@@ -1154,7 +1137,7 @@ fun EditPumpingDialog(pumping: PumpingEvent, onDismiss: () -> Unit, onSave: (Pum
         DialogTitle("Edit pumping")
         Spacer(Modifier.height(16.dp))
         // Keeps the entry's own date (it may be from earlier in the week)
-        TimeField(label = "Time", millis = time, onChange = { time = it }, resolve = { h, m -> withTime(pumping.timeMillis, h, m) })
+        TimeField(label = "Time", millis = time, onChange = { time = it }, keepDay = true)
         Spacer(Modifier.height(16.dp))
 
         AmountStepper(ml = ml, onChange = { ml = it }, max = PUMP_ML_MAX)

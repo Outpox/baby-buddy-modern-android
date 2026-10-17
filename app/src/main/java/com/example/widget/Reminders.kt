@@ -25,22 +25,27 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * "Feed due" and "awake for a while" reminders (Settings → Notifications). An alarm fires at the due time;
- * the receiver refreshes from the server first, so a feed or sleep logged on another phone cancels it.
- * Each reminder fires once per feed / wake-up ("anchor").
+ * "Feed due", "diaper change due", "awake for a while" and "asleep for a while" reminders (Settings → Notifications).
+ * An alarm fires at the due time; the receiver refreshes from the server first, so a feed, change or sleep logged
+ * on another phone cancels it. With a heads-up set ([ReminderSettings.earlyMinutes]) an alarm also fires that long
+ * before, posting "due in 10 min", which the due notification later replaces. Each stage fires once per feed /
+ * change / wake-up / sleep ("anchor").
  */
 object Reminders {
 
     const val KIND_FEED = "feed"
     const val KIND_AWAKE = "awake"
     const val KIND_SLEEP = "sleep"
+    const val KIND_DIAPER = "diaper"
+    private val KINDS = listOf(KIND_FEED, KIND_AWAKE, KIND_SLEEP, KIND_DIAPER)
 
     private const val CHANNEL_ID = "reminders"
     private const val CHANNEL_NAME = "Reminders"
     private const val PREFS = "reminders"
     private const val MISSED_GRACE_MS = 2 * 60 * 60_000L // a reminder missed by more than this is skipped
+    private const val EARLY_ALARM_SLACK_MS = 60_000L // an alarm a little early still counts as on time
 
-    /** (anchor, due time): the last feed/wake-up and when to remind, or null when off or not applicable. */
+    /** (anchor, due time): the last feed/change/wake-up/sleep start and when to remind, or null when off or not applicable. */
     private fun due(kind: String): Pair<Long, Long>? {
         val repo = BabyBuddyRepository.instance
         val settings = repo.reminders.value
@@ -51,6 +56,12 @@ object Reminders {
                 if (TrackedItem.BREASTFEEDING in hidden && TrackedItem.BOTTLE in hidden) return null
                 val last = repo.lastFeedMillis.value ?: return null
                 last to last + settings.feedAfterMinutes * 60_000L
+            }
+
+            KIND_DIAPER -> {
+                if (settings.diaperAfterMinutes <= 0 || TrackedItem.DIAPERS in hidden) return null
+                val last = repo.lastDiaper.value?.timeMillis ?: return null
+                last to last + settings.diaperAfterMinutes * 60_000L
             }
 
             KIND_SLEEP -> {
@@ -69,19 +80,18 @@ object Reminders {
         }
     }
 
-    /** Sets (or clears) both alarms from the current entries and settings. */
+    /** Sets (or clears) every reminder's alarm from the current entries and settings. */
     fun schedule(context: Context) {
-        schedule(context, KIND_FEED)
-        schedule(context, KIND_AWAKE)
-        schedule(context, KIND_SLEEP)
+        KINDS.forEach { schedule(context, it) }
     }
 
-    private fun schedule(context: Context, kind: String) {
+    /** Posts whatever stage is due by [now] (missed by less than the grace period), else sets the alarm for the next one. */
+    private fun schedule(context: Context, kind: String, now: Long = System.currentTimeMillis()) {
         val alarms = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pending = alarmIntent(context, kind)
         val due = due(kind)
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        // A shown reminder about an older feed/wake-up is out of date
+        // A shown reminder about an older feed/change/wake-up is out of date
         if (prefs.getLong("shown_$kind", -1L).let { it >= 0 && it != due?.first }) {
             NotificationManagerCompat.from(context).cancel(notificationId(kind))
             prefs.edit().remove("shown_$kind").apply()
@@ -90,54 +100,75 @@ object Reminders {
             alarms.cancel(pending)
             return
         }
-        val now = System.currentTimeMillis()
-        if (due.second <= now) {
-            alarms.cancel(pending)
-            if (now - due.second < MISSED_GRACE_MS) post(context, kind, due.first)
-            return
+        val (anchor, dueAt) = due
+        val earlyMs = BabyBuddyRepository.instance.reminders.value.earlyMinutes * 60_000L
+        val earlyAt = dueAt - earlyMs
+        val earlyPending = earlyMs > 0 && earlyAt > anchor && prefs.getLong("early_$kind", -1L) != anchor
+        when {
+            dueAt <= now -> {
+                alarms.cancel(pending)
+                if (now - dueAt < MISSED_GRACE_MS) post(context, kind, anchor, dueAt)
+            }
+
+            earlyPending && earlyAt <= now -> {
+                post(context, kind, anchor, dueAt)
+                alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, dueAt, pending)
+            }
+
+            // Inexact is fine for a reminder, and needs no exact-alarm permission
+            else -> alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, if (earlyPending) earlyAt else dueAt, pending)
         }
-        // Inexact is fine for a reminder, and needs no exact-alarm permission
-        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due.second, pending)
     }
 
     /** Alarm fired: post if still due (after a refresh), else reschedule. */
     internal suspend fun onAlarm(context: Context, kind: String) {
         withTimeoutOrNull(20_000L) { BabyBuddyRepository.instance.refresh() }
-        val due = due(kind)
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (due != null && System.currentTimeMillis() >= due.second - 60_000L && prefs.getLong("done_$kind", -1L) != due.first) {
-            post(context, kind, due.first)
-        } else {
-            schedule(context, kind)
-        }
+        schedule(context, kind, System.currentTimeMillis() + EARLY_ALARM_SLACK_MS)
     }
 
-    private fun post(context: Context, kind: String, anchor: Long) {
+    /** The heads-up ("due in 10 min") while [dueAt] is still ahead, else the reminder itself. */
+    private fun post(context: Context, kind: String, anchor: Long, dueAt: Long) {
+        val now = System.currentTimeMillis()
+        val early = dueAt - now > EARLY_ALARM_SLACK_MS
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit().putLong("done_$kind", anchor).putLong("shown_$kind", anchor).apply()
+        prefs.edit().putLong(if (early) "early_$kind" else "done_$kind", anchor).putLong("shown_$kind", anchor).apply()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
         ensureChannel(context)
-        val minutes = ((System.currentTimeMillis() - anchor) / 60_000L).toInt()
+        val minutes = ((now - anchor) / 60_000L).toInt()
+        val inMinutes = formatMinutes(((dueAt - now + 59_999L) / 60_000L).toInt())
         val (title, text) = when (kind) {
-            KIND_FEED -> "Feed due" to "Last feed started ${formatMinutes(minutes)} ago, at ${TimeFormat.clock(anchor)}"
-            KIND_SLEEP -> "Asleep for ${formatMinutes(minutes)}" to "Fell asleep at ${TimeFormat.clock(anchor)}"
-            else -> "Awake for ${formatMinutes(minutes)}" to "Woke up at ${TimeFormat.clock(anchor)}. Time for a nap?"
+            KIND_FEED -> (if (early) "Feed due in $inMinutes" else "Feed due") to
+                "Last feed started ${formatMinutes(minutes)} ago, at ${TimeFormat.clock(anchor)}"
+
+            KIND_DIAPER -> (if (early) "Diaper change due in $inMinutes" else "Diaper change due") to
+                "Last change ${formatMinutes(minutes)} ago, at ${TimeFormat.clock(anchor)}"
+
+            KIND_SLEEP -> (if (early) "Wake-up time in $inMinutes" else "Asleep for ${formatMinutes(minutes)}") to
+                "Fell asleep at ${TimeFormat.clock(anchor)}"
+
+            else -> (if (early) "Nap time in $inMinutes" else "Awake for ${formatMinutes(minutes)}") to
+                "Woke up at ${TimeFormat.clock(anchor)}" + if (early) "" else ". Time for a nap?"
         }
         val open = PendingIntent.getActivity(
             context,
             notificationId(kind),
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra(BabyBuddyQuickLogWidget.EXTRA_NAVIGATE_TO, if (kind == KIND_FEED) "TODAY_DASHBOARD" else "SLEEP")
+                putExtra(BabyBuddyQuickLogWidget.EXTRA_NAVIGATE_TO, if (kind == KIND_FEED || kind == KIND_DIAPER) "TODAY_DASHBOARD" else "SLEEP")
             },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val icon = when (kind) {
+            KIND_FEED -> R.drawable.ic_widget_feed
+            KIND_DIAPER -> R.drawable.ic_widget_diaper
+            else -> R.drawable.ic_widget_sleep
+        }
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(if (kind == KIND_FEED) R.drawable.ic_widget_feed else R.drawable.ic_widget_sleep)
+            .setSmallIcon(icon)
             .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
@@ -155,7 +186,8 @@ object Reminders {
     private fun notificationId(kind: String) = when (kind) {
         KIND_FEED -> 4301
         KIND_AWAKE -> 4302
-        else -> 4303
+        KIND_SLEEP -> 4303
+        else -> 4304
     }
 
     private fun alarmIntent(context: Context, kind: String): PendingIntent = PendingIntent.getBroadcast(

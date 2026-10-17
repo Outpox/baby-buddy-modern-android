@@ -13,6 +13,7 @@ import com.example.data.api.BabyBuddyPumpingDto
 import com.example.data.api.BabyBuddySleepDto
 import com.example.data.api.BabyBuddyTemperatureDto
 import com.example.data.api.BabyBuddyTummyTimeDto
+import com.example.data.ml.RhythmEvents
 import com.example.data.model.BATH_NOTE_TEXT
 import com.example.data.model.BATH_TAG
 import com.example.data.model.BabyProfile
@@ -188,6 +189,8 @@ class BabyBuddyRepository {
             ?.putInt(PREF_REMIND_FEED, settings.feedAfterMinutes)
             ?.putInt(PREF_REMIND_AWAKE, settings.awakeAfterMinutes)
             ?.putInt(PREF_REMIND_SLEEP, settings.sleepAfterMinutes)
+            ?.putInt(PREF_REMIND_DIAPER, settings.diaperAfterMinutes)
+            ?.putInt(PREF_REMIND_EARLY, settings.earlyMinutes)
             ?.apply()
     }
 
@@ -252,6 +255,15 @@ class BabyBuddyRepository {
 
     /** 24-hour clock (default) or 12-hour with AM/PM. */
     val use24h: StateFlow<Boolean> = _use24h.asStateFlow()
+
+    // Settings → Appearance: the Models tab in Trends (rhythm models fitted on the phone)
+    private val _modelsTab = MutableStateFlow(false)
+    val modelsTab: StateFlow<Boolean> = _modelsTab.asStateFlow()
+
+    fun setModelsTab(enabled: Boolean) {
+        _modelsTab.value = enabled
+        prefs?.edit()?.putBoolean(PREF_MODELS_TAB, enabled)?.apply()
+    }
 
     fun setUse24h(enabled: Boolean) {
         _use24h.value = enabled
@@ -1065,6 +1077,50 @@ class BabyBuddyRepository {
         return days * 86400 + h * 3600 + m * 60 + sec
     }
 
+    /**
+     * Feeds (from the day before [fromMillis], for gaps across it), diaper changes and sleeps (ended since
+     * [fromMillis], plus the one being timed, ending now) from the server, or the demo data.
+     */
+    private suspend fun fetchEvents(fromMillis: Long): Triple<List<FeedingEvent>, List<DiaperEvent>, List<SleepEvent>> {
+        val api = remoteApi
+        val child = remoteChildId
+        if (_connectionConfig.value.isDemoMode) return Triple(allDemoFeedings.sortedBy { it.timeMillis }, allDemoDiapers, allDemoSleeps)
+        check(api != null && child != null) { "Connect to your Baby Buddy server to see trends" }
+        val fetchFrom = fromMillis - 24 * 60 * 60_000L
+        val feedResp = api.getFeedings(remoteAuthHeader, child, since = isoUtc(fetchFrom), limit = 1000)
+        val changeResp = api.getChanges(remoteAuthHeader, child, since = isoUtc(fromMillis), limit = 1000)
+        if (!feedResp.isSuccessful) error("HTTP ${feedResp.code()} loading feedings")
+        if (!changeResp.isSuccessful) error("HTTP ${changeResp.code()} loading diaper changes")
+        val feeds = feedResp.body()?.results.orEmpty().map(::mapFeeding).sortedBy { it.timeMillis }
+        val changes = changeResp.body()?.results.orEmpty().map(::mapChange)
+        val sleepResp = runCatching {
+            api.getSleep(remoteAuthHeader, child, endedSince = isoUtc(fromMillis), limit = 1000)
+        }.getOrNull()
+        val now = System.currentTimeMillis()
+        val sleeps = sleepResp?.takeIf { it.isSuccessful }?.body()?.results.orEmpty().map(::mapSleep) +
+            listOfNotNull(
+                _sleepTimer.value.takeIf { it.isRunning }?.let { t ->
+                    SleepEvent(id = -1L, timeMillis = t.startMillis, endMillis = now, isNap = isNapTime(t.startMillis))
+                }
+            )
+        return Triple(feeds, changes, sleeps)
+    }
+
+    /** The last [days] days of feeds, changes and finished sleeps, for the rhythm models (Trends → Models). */
+    suspend fun loadRhythmEvents(days: Int, birthDate: String?): Result<RhythmEvents> = withContext(Dispatchers.IO) {
+        try {
+            val from = System.currentTimeMillis() - days * 24 * 60 * 60_000L
+            val (feeds, changes, sleeps) = fetchEvents(from)
+            val running = _sleepTimer.value.takeIf { it.isRunning }?.startMillis
+            val birth = birthDate?.let { runCatching { SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(it)?.time }.getOrNull() }
+            Result.success(RhythmEvents(feeds, changes, sleeps.filter { it.id != -1L }, running, birth))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /** Per-day feed/diaper totals for the last [days] days (today last). Needs a server connection. */
     suspend fun loadTrends(days: Int): Result<List<DayStats>> = withContext(Dispatchers.IO) {
         val isDemo = _connectionConfig.value.isDemoMode
@@ -1082,38 +1138,7 @@ class BabyBuddyRepository {
                 add(Calendar.DAY_OF_YEAR, -(days - 1))
             }
 
-            val feeds: List<FeedingEvent>
-            val changes: List<DiaperEvent>
-            val sleeps: List<SleepEvent>
-
-            if (isDemo) {
-                feeds = allDemoFeedings.sortedBy { it.timeMillis }
-                changes = allDemoDiapers
-                sleeps = allDemoSleeps
-            } else {
-                val fetchFrom = (firstDay.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
-
-                val feedResp = api!!.getFeedings(remoteAuthHeader, child!!, since = isoUtc(fetchFrom.timeInMillis), limit = 1000)
-                val changeResp = api.getChanges(remoteAuthHeader, child, since = isoUtc(firstDay.timeInMillis), limit = 1000)
-                if (!feedResp.isSuccessful) error("HTTP ${feedResp.code()} loading feedings")
-                if (!changeResp.isSuccessful) error("HTTP ${changeResp.code()} loading diaper changes")
-
-                val fetchedFeeds = feedResp.body()?.results.orEmpty().map(::mapFeeding).sortedBy { it.timeMillis }
-                val fetchedChanges = changeResp.body()?.results.orEmpty().map(::mapChange)
-                val sleepResp = runCatching {
-                    api.getSleep(remoteAuthHeader, child, endedSince = isoUtc(firstDay.timeInMillis), limit = 1000)
-                }.getOrNull()
-                val now = System.currentTimeMillis()
-                val fetchedSleeps = sleepResp?.takeIf { it.isSuccessful }?.body()?.results.orEmpty().map(::mapSleep) +
-                    listOfNotNull(
-                        _sleepTimer.value.takeIf { it.isRunning }?.let { t ->
-                            SleepEvent(id = -1L, timeMillis = t.startMillis, endMillis = now, isNap = isNapTime(t.startMillis))
-                        }
-                    )
-                feeds = fetchedFeeds
-                changes = fetchedChanges
-                sleeps = fetchedSleeps
-            }
+            val (feeds, changes, sleeps) = fetchEvents(firstDay.timeInMillis)
 
             fun endOf(f: FeedingEvent) = f.timeMillis + (f.leftDurationSec + f.rightDurationSec) * 1000L
             // Gaps between consecutive feeds, keyed by the time the gap starts
@@ -2473,6 +2498,7 @@ class BabyBuddyRepository {
         _caregiverName.value = p.getString(PREF_CAREGIVER, "").orEmpty()
         _feedNotificationEnabled.value = p.getBoolean(PREF_FEED_NOTIFICATION, true)
         _use24h.value = p.getBoolean(PREF_USE_24H, true)
+        _modelsTab.value = p.getBoolean(PREF_MODELS_TAB, false)
         TimeFormat.use24h = _use24h.value
         TimeFormat.useWheel = p.getBoolean(PREF_WHEEL_INPUT, false)
         syncScope.launch {
@@ -2495,7 +2521,13 @@ class BabyBuddyRepository {
         sleepTimerRemoteId = p.getLong(PREF_SLEEP_TIMER_ID, -1L).takeIf { it >= 0 }
         feedEndedAt = p.getLong(PREF_FEED_ENDED_AT, 0L)
         sleepEndedAt = p.getLong(PREF_SLEEP_ENDED_AT, 0L)
-        _reminders.value = ReminderSettings(p.getInt(PREF_REMIND_FEED, 0), p.getInt(PREF_REMIND_AWAKE, 0), p.getInt(PREF_REMIND_SLEEP, 0))
+        _reminders.value = ReminderSettings(
+            p.getInt(PREF_REMIND_FEED, 0),
+            p.getInt(PREF_REMIND_AWAKE, 0),
+            p.getInt(PREF_REMIND_SLEEP, 0),
+            p.getInt(PREF_REMIND_DIAPER, 0),
+            p.getInt(PREF_REMIND_EARLY, 0)
+        )
         _babySex.value = p.getString(PREF_BABY_SEX, null)?.let { name -> BabySex.entries.firstOrNull { it.name == name } }
         _hiddenItems.value = p.getString(PREF_HIDDEN_ITEMS, null).orEmpty().split(",")
             .mapNotNull { name -> TrackedItem.entries.firstOrNull { it.name == name } }.toSet()
@@ -2746,6 +2778,9 @@ class BabyBuddyRepository {
         private const val PREF_REMIND_SLEEP = "remind_sleep_minutes"
         private const val PREF_WHEEL_INPUT = "time_input_wheel_v2" // v2: typing became the default
         private const val PREF_REMIND_AWAKE = "remind_awake_minutes"
+        private const val PREF_REMIND_DIAPER = "remind_diaper_minutes"
+        private const val PREF_REMIND_EARLY = "remind_early_minutes"
+        private const val PREF_MODELS_TAB = "trends_models_tab"
         private const val PREF_SLEEP_START = "sleep_timer_start"
         private const val PREF_SLEEP_NOTES = "sleep_timer_notes"
         private const val PREF_CAREGIVER = "caregiver_name"
