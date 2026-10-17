@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -57,8 +59,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -72,6 +76,7 @@ import com.example.data.model.ServerConnectionConfig
 import com.example.data.model.ThemeMode
 import com.example.data.model.TrackedItem
 import com.example.data.model.formatMinutes
+import com.example.ui.CertificatePrompt
 import com.example.ui.components.DurationField
 import com.example.ui.components.SegmentedToggle
 import com.example.ui.theme.OnPrimary
@@ -138,6 +143,9 @@ private fun SwitchSetting(title: String, description: String, checked: Boolean, 
     }
 }
 
+private const val BABY_BUDDY_REPO = "https://github.com/babybuddy/babybuddy"
+private const val APP_REPO = "https://github.com/liorbass/baby-buddy-modern-android"
+
 private const val MODEL_TIMED = "When the model saved in Trends → Models expects it; the time below is the fallback"
 
 @Composable
@@ -165,9 +173,39 @@ fun ConnectBackendScreen(
     hiddenItems: Set<TrackedItem> = emptySet(),
     onItemTrackedChange: (TrackedItem, Boolean) -> Unit = { _, _ -> },
     onEnterDemoMode: () -> Unit = {},
+    certificatePrompt: CertificatePrompt? = null,
+    onTrustCertificate: () -> Unit = {},
+    onDismissCertificate: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    certificatePrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = onDismissCertificate,
+            title = { Text(if (prompt.changed) "Server certificate changed" else "Trust this certificate?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (prompt.changed) {
+                            "The server's certificate isn't the one you trusted before. That's expected if you renewed it; otherwise someone may be intercepting the connection."
+                        } else {
+                            "The server's certificate isn't signed by a known authority. Check that this SHA-256 fingerprint matches your server's certificate before trusting it."
+                        }
+                    )
+                    Text(prompt.fingerprint, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onTrustCertificate, modifier = Modifier.testTag("trust_cert_btn")) { Text("Trust", color = PrimaryColor) }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissCertificate) { Text("Cancel") }
+            }
+        )
+    }
+
     val isLoggedIn = config.isConnected && !config.isDemoMode
+    val uriHandler = LocalUriHandler.current
+    val openLink: (String) -> Unit = { url -> runCatching { uriHandler.openUri(url) }.onFailure { onShowToast("No browser to open $url") } }
     // Demo mode gets the whole of Settings too, so every feature can be tried; its Server connection logs in for real
     val showSettings = config.isConnected
     var serverUrl by remember { mutableStateOf(config.serverUrl) }
@@ -242,11 +280,14 @@ fun ConnectBackendScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "Allow self-signed certificates",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Allow self-signed certificates", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "You confirm the server's certificate once; only that one is trusted",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Switch(
                     checked = allowSelfSigned,
                     onCheckedChange = { allowSelfSigned = it },
@@ -388,6 +429,28 @@ fun ConnectBackendScreen(
                 // Up top as well as under the form, so it's seen before the server fields
                 TextButton(onClick = onEnterDemoMode, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("demo_mode_link")) {
                     Text("No server yet? Try the demo with sample data →", color = PrimaryColor, fontWeight = FontWeight.Medium)
+                }
+                var showWhatIs by rememberSaveable { mutableStateOf(false) }
+                TextButton(onClick = { showWhatIs = !showWhatIs }, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("what_is_baby_buddy_link")) {
+                    Text(if (showWhatIs) "What is Baby Buddy? ▴" else "What is Baby Buddy? ▾", color = PrimaryColor, fontWeight = FontWeight.Medium)
+                }
+                AnimatedVisibility(visible = showWhatIs) {
+                    Surface(color = SurfaceContainerLow, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "Baby Buddy is a free, open-source web app for tracking a baby's feeds, sleep, diapers and growth. " +
+                                    "You host it yourself (on a home server, NAS or cloud machine), so your data stays with you.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "This app is an unofficial phone companion for it: it connects to your Baby Buddy server and keeps everything there, so the whole family shares the same log.",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            TextButton(onClick = { openLink(BABY_BUDDY_REPO) }, contentPadding = PaddingValues(0.dp)) {
+                                Text("Set up a server: Baby Buddy on GitHub →", color = PrimaryColor, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
                 }
             }
             connectionForm()
@@ -702,6 +765,14 @@ fun ConnectBackendScreen(
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                     Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                }
+            }
+            Column {
+                TextButton(onClick = { openLink(APP_REPO) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("app_repo_link")) {
+                    Text("Source code, issues and releases on GitHub →", color = PrimaryColor, fontWeight = FontWeight.Medium)
+                }
+                TextButton(onClick = { openLink(BABY_BUDDY_REPO) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.testTag("baby_buddy_repo_link")) {
+                    Text("Baby Buddy, the server this app works with →", color = PrimaryColor, fontWeight = FontWeight.Medium)
                 }
             }
         }

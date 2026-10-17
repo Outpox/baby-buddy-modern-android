@@ -1,0 +1,5 @@
+- Self-signed certificates: you confirm the server's certificate fingerprint once and only that certificate is trusted (no more trusting any certificate); logins saved before keep working
+- Clearer error when a server's certificate isn't trusted
+- Logging in after trying the demo now stays logged in after a restart
+- Login screen: "What is Baby Buddy?" explainer with a link to the server project
+- Settings → About: links to this app's GitHub repo and to the Baby Buddy server project

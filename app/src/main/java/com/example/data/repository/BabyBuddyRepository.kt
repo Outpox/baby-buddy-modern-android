@@ -14,6 +14,8 @@ import com.example.data.api.BabyBuddySleepDto
 import com.example.data.api.BabyBuddyTemperatureDto
 import com.example.data.api.BabyBuddyTummyTimeDto
 import com.example.data.api.PaginatedResponse
+import com.example.data.api.UntrustedCertificateException
+import com.example.data.api.findInChain
 import com.example.data.ml.RhythmEvents
 import com.example.data.ml.RhythmPrediction
 import com.example.data.ml.RhythmTarget
@@ -352,7 +354,7 @@ class BabyBuddyRepository {
         clearRemote()
         prefs?.edit()
             ?.remove(PREF_URL)?.remove(PREF_TOKEN_ENC)?.remove(PREF_CF_ID)
-            ?.remove(PREF_CF_SECRET_ENC)?.remove(PREF_CHILD_ID)
+            ?.remove(PREF_CF_SECRET_ENC)?.remove(PREF_CERT_PIN)?.remove(PREF_CHILD_ID)
             ?.remove(PREF_CHILD_NAME)?.remove(PREF_BIRTH_DATE)
             ?.putBoolean(PREF_DEMO_MODE, true)?.apply()
 
@@ -459,10 +461,12 @@ class BabyBuddyRepository {
         token: String,
         allowSelfSigned: Boolean = false,
         cfClientId: String = "",
-        cfClientSecret: String = ""
+        cfClientSecret: String = "",
+        pinnedCertSha256: String = ""
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val api = BabyBuddyApiClient.createService(serverUrl, allowSelfSigned, cfClientId, cfClientSecret)
+            val pin = pinnedCertSha256.takeIf { allowSelfSigned }.orEmpty()
+            val api = BabyBuddyApiClient.createService(serverUrl, allowSelfSigned, cfClientId, cfClientSecret, pin)
             val authHeader = if (token.startsWith("Token ")) token else "Token $token"
             val response = api.getChildren(authHeader)
             if (response.isSuccessful) {
@@ -487,6 +491,7 @@ class BabyBuddyRepository {
                         isConnected = true,
                         isDemoMode = false,
                         allowSelfSignedCert = allowSelfSigned,
+                        pinnedCertSha256 = pin,
                         cfClientId = cfClientId,
                         cfClientSecret = cfClientSecret,
                         detectedChildName = detectedName,
@@ -502,6 +507,8 @@ class BabyBuddyRepository {
                     ?.putString(PREF_URL, serverUrl)
                     ?.putString(PREF_TOKEN_ENC, runCatching { SecretCipher.encrypt(token) }.getOrNull())
                     ?.putBoolean(PREF_SELF_SIGNED, allowSelfSigned)
+                    ?.putString(PREF_CERT_PIN, pin)
+                    ?.remove(PREF_DEMO_MODE) // logging in from demo mode must stick after a restart
                     ?.putString(PREF_CF_ID, cfClientId)
                     ?.putString(PREF_CF_SECRET_ENC, cfClientSecret.takeIf { it.isNotBlank() }?.let { runCatching { SecretCipher.encrypt(it) }.getOrNull() })
                     ?.putInt(PREF_CHILD_ID, detectedChild?.id ?: -1)
@@ -534,7 +541,18 @@ class BabyBuddyRepository {
         } catch (e: com.squareup.moshi.JsonEncodingException) {
             Result.failure(Exception("The server sent a web page instead of the API. If it's behind Cloudflare Access, add a service token."))
         } catch (e: Exception) {
-            Result.failure(e)
+            // OkHttp wraps the trust manager's verdict in an SSLHandshakeException; surface it so the user can trust the certificate
+            val untrusted = e.findInChain { it is UntrustedCertificateException }
+            Result.failure(
+                when {
+                    untrusted != null -> untrusted
+
+                    !allowSelfSigned && e.findInChain { it is java.security.cert.CertPathValidatorException } != null ->
+                        Exception("The server's certificate isn't trusted. If it's self-signed, turn on Allow self-signed certificates.")
+
+                    else -> e
+                }
+            )
         }
     }
 
@@ -1289,7 +1307,7 @@ class BabyBuddyRepository {
 
     fun disconnect() {
         clearRemote()
-        prefs?.edit()?.remove(PREF_URL)?.remove(PREF_TOKEN_ENC)?.remove(PREF_CF_ID)?.remove(PREF_CF_SECRET_ENC)?.remove(PREF_CHILD_ID)?.remove(PREF_CHILD_NAME)?.remove(PREF_BIRTH_DATE)?.remove(PREF_DEMO_MODE)?.apply()
+        prefs?.edit()?.remove(PREF_URL)?.remove(PREF_TOKEN_ENC)?.remove(PREF_CF_ID)?.remove(PREF_CF_SECRET_ENC)?.remove(PREF_CERT_PIN)?.remove(PREF_CHILD_ID)?.remove(PREF_CHILD_NAME)?.remove(PREF_BIRTH_DATE)?.remove(PREF_DEMO_MODE)?.apply()
         _connectionConfig.value = ServerConnectionConfig()
         _feedings.value = emptyList()
         _sleeps.value = emptyList()
@@ -2611,7 +2629,12 @@ class BabyBuddyRepository {
             flushPendingWrites() // retries on its own if the server isn't reachable yet
             syncScope.launch {
                 val c = _connectionConfig.value
-                testConnection(c.serverUrl, restoredToken.orEmpty(), c.allowSelfSignedCert, c.cfClientId, c.cfClientSecret)
+                val result = testConnection(c.serverUrl, restoredToken.orEmpty(), c.allowSelfSignedCert, c.cfClientId, c.cfClientSecret, c.pinnedCertSha256)
+                // Logins saved before pinning trusted every certificate: keep the server's current one rather than locking them out
+                val untrusted = result.exceptionOrNull() as? UntrustedCertificateException
+                if (untrusted != null && c.allowSelfSignedCert && c.pinnedCertSha256.isBlank()) {
+                    testConnection(c.serverUrl, restoredToken.orEmpty(), true, c.cfClientId, c.cfClientSecret, untrusted.fingerprint)
+                }
             }
         } else {
             offline.clear()
@@ -2698,11 +2721,12 @@ class BabyBuddyRepository {
         val token = p.getString(PREF_TOKEN_ENC, null)?.let(SecretCipher::decrypt) ?: return false
         restoredToken = token
         val selfSigned = p.getBoolean(PREF_SELF_SIGNED, false)
+        val certPin = p.getString(PREF_CERT_PIN, null).orEmpty()
         val cfId = p.getString(PREF_CF_ID, null).orEmpty()
         val cfSecret = p.getString(PREF_CF_SECRET_ENC, null)?.let(SecretCipher::decrypt).orEmpty()
         val childId = p.getInt(PREF_CHILD_ID, -1).takeIf { it >= 0 }
         // Set up writes right away so entries logged while the server is unreachable get queued
-        remoteApi = BabyBuddyApiClient.createService(url, selfSigned, cfId, cfSecret)
+        remoteApi = BabyBuddyApiClient.createService(url, selfSigned, cfId, cfSecret, certPin)
         remoteAuthHeader = if (token.startsWith("Token ")) token else "Token $token"
         remoteChildId = childId
         _connectionConfig.update {
@@ -2710,6 +2734,7 @@ class BabyBuddyRepository {
                 serverUrl = url,
                 apiToken = token,
                 allowSelfSignedCert = selfSigned,
+                pinnedCertSha256 = certPin,
                 cfClientId = cfId,
                 cfClientSecret = cfSecret,
                 isConnected = true,
@@ -2853,6 +2878,7 @@ class BabyBuddyRepository {
         private const val PREF_THEME_MODE = "theme_mode"
         private val SERVER_COLORS = setOf("black", "brown", "gray", "green", "orange", "red", "white", "yellow")
         private const val PREF_SELF_SIGNED = "allow_self_signed"
+        private const val PREF_CERT_PIN = "pinned_cert_sha256"
         private const val PREF_CF_ID = "cf_access_client_id"
         private const val PREF_CF_SECRET_ENC = "cf_access_client_secret_enc"
         private const val PREF_CHILD_ID = "child_id"

@@ -172,6 +172,7 @@ data class ServerConnectionConfig(
     val lastSyncMillis: Long = 0L, // when today's entries were last fetched from the server
     val latencyMs: Int = 0,
     val allowSelfSignedCert: Boolean = false,
+    val pinnedCertSha256: String = "", // the self-signed certificate the user trusted (SHA-256), if any
     val cfClientId: String = "", // Cloudflare Access service token, optional
     val cfClientSecret: String = "",
     val syncCadence: String = "Instant", // Instant, 5 Mins, Manual

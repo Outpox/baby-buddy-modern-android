@@ -36,8 +36,8 @@ android {
     targetSdk = 36
     // Bump both for each release (versionCode = MAJOR*10000 + MINOR*100 + PATCH), then tag vX.Y.Z;
     // the release workflow checks the tag matches. Kept as literals so F-Droid can read them.
-    versionCode = 10400
-    versionName = "1.4.0"
+    versionCode = 10401
+    versionName = "1.4.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "GIT_DESCRIBE", "\"$gitDescribe\"")
@@ -132,6 +132,8 @@ dependencies {
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.okhttp.mockwebserver)
+  testImplementation(libs.okhttp.tls)
   testImplementation(libs.robolectric)
   androidTestImplementation(platform(libs.androidx.compose.bom))
   androidTestImplementation(libs.androidx.compose.ui.test.junit4)

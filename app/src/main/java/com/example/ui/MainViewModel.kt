@@ -3,6 +3,7 @@ package com.example.ui
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.api.UntrustedCertificateException
 import com.example.data.ml.RhythmModel
 import com.example.data.ml.RhythmTarget
 import com.example.data.ml.SavedRhythmModel
@@ -89,6 +90,16 @@ data class UiNotification(
     val undo: (() -> Unit)? = null
 )
 
+/** A login waiting for the user to trust the server's self-signed certificate; [changed] if a different one was trusted before. */
+data class CertificatePrompt(
+    val url: String,
+    val token: String,
+    val cfClientId: String,
+    val cfClientSecret: String,
+    val fingerprint: String,
+    val changed: Boolean
+)
+
 class MainViewModel(
     private val repository: BabyBuddyRepository = BabyBuddyRepository.instance
 ) : ViewModel() {
@@ -98,6 +109,9 @@ class MainViewModel(
 
     private val _notification = MutableStateFlow<UiNotification?>(null)
     val notification: StateFlow<UiNotification?> = _notification.asStateFlow()
+
+    private val _certificatePrompt = MutableStateFlow<CertificatePrompt?>(null)
+    val certificatePrompt: StateFlow<CertificatePrompt?> = _certificatePrompt.asStateFlow()
 
     private val _showAddWidgetModal = MutableStateFlow(false)
     val showAddWidgetModal: StateFlow<Boolean> = _showAddWidgetModal.asStateFlow()
@@ -578,13 +592,34 @@ class MainViewModel(
     }
 
     fun testBackendConnection(url: String, token: String, allowSelfSigned: Boolean, cfClientId: String, cfClientSecret: String) {
+        // Reconnecting to the same server keeps the certificate trusted before
+        val config = connectionConfig.value
+        val pin = config.pinnedCertSha256.takeIf { config.serverUrl == url }.orEmpty()
+        connect(url, token, allowSelfSigned, cfClientId, cfClientSecret, pin)
+    }
+
+    fun trustCertificate() {
+        val prompt = _certificatePrompt.value ?: return
+        _certificatePrompt.value = null
+        connect(prompt.url, prompt.token, true, prompt.cfClientId, prompt.cfClientSecret, prompt.fingerprint)
+    }
+
+    fun dismissCertificatePrompt() {
+        _certificatePrompt.value = null
+    }
+
+    private fun connect(url: String, token: String, allowSelfSigned: Boolean, cfClientId: String, cfClientSecret: String, pin: String) {
         viewModelScope.launch {
             showToast("Connecting to Baby Buddy...", isSuccess = true)
-            val result = repository.testConnection(url, token, allowSelfSigned, cfClientId, cfClientSecret)
+            val result = repository.testConnection(url, token, allowSelfSigned, cfClientId, cfClientSecret, pin)
+            val untrusted = result.exceptionOrNull() as? UntrustedCertificateException
             if (result.isSuccess) {
                 showToast(result.getOrDefault("Connected successfully!"))
                 navigateTo(ScreenDestination.TODAY_DASHBOARD)
                 refresh()
+            } else if (untrusted != null) {
+                _notification.value = null
+                _certificatePrompt.value = CertificatePrompt(url, token, cfClientId, cfClientSecret, untrusted.fingerprint, changed = pin.isNotBlank())
             } else {
                 showToast("Connection failed: ${result.exceptionOrNull()?.localizedMessage}", isSuccess = false)
             }

@@ -166,6 +166,7 @@ fun BabyBuddyApp(
     val currentScreen by viewModel.currentScreen.collectAsState()
     val babyProfile by viewModel.babyProfile.collectAsState()
     val connectionConfig by viewModel.connectionConfig.collectAsState()
+    val certificatePrompt by viewModel.certificatePrompt.collectAsState()
     val liveTimerState by viewModel.liveTimerState.collectAsState()
     val recentFeedings by viewModel.feedings.collectAsState()
     val recentDiapers by viewModel.diapers.collectAsState()
@@ -505,6 +506,9 @@ fun BabyBuddyApp(
                         onShowToast = { msg -> viewModel.showToast(msg) },
                         onDisconnect = { viewModel.disconnectServer() },
                         onEnterDemoMode = { viewModel.enterDemoMode() },
+                        certificatePrompt = certificatePrompt,
+                        onTrustCertificate = { viewModel.trustCertificate() },
+                        onDismissCertificate = { viewModel.dismissCertificatePrompt() },
                         caregiverName = caregiverName,
                         onCaregiverNameChange = { viewModel.setCaregiverName(it) },
                         babySex = babySex,

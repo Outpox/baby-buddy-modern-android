@@ -16,11 +16,13 @@ import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
-import java.security.SecureRandom
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
+import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 
 data class BabyBuddyChildDto(
@@ -311,12 +313,15 @@ object BabyBuddyApiClient {
     /**
      * [cfClientId]/[cfClientSecret] are a Cloudflare Access service token, sent on every request
      * so a server behind Cloudflare Access is reachable without the browser login.
+     * With [allowSelfSigned], a certificate the system doesn't trust is accepted only if its SHA-256
+     * fingerprint is [pinnedCertSha256]; any other fails with [UntrustedCertificateException].
      */
     fun createService(
         baseUrl: String,
         allowSelfSigned: Boolean = false,
         cfClientId: String = "",
-        cfClientSecret: String = ""
+        cfClientSecret: String = "",
+        pinnedCertSha256: String = ""
     ): BabyBuddyApiService {
         val sanitizedUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
 
@@ -343,18 +348,15 @@ object BabyBuddyApiClient {
             )
 
         if (allowSelfSigned) {
-            try {
-                val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-                })
-                val sslContext = SSLContext.getInstance("SSL")
-                sslContext.init(null, trustAllCerts, SecureRandom())
-                builder.sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-                builder.hostnameVerifier { _, _ -> true }
-            } catch (_: Exception) {
-                // fallback to default SSL
+            val trustManager = PinningTrustManager(pinnedCertSha256)
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(null, arrayOf(trustManager), null)
+            builder.sslSocketFactory(sslContext.socketFactory, trustManager)
+            val defaultVerifier = builder.build().hostnameVerifier
+            // Self-signed certificates often don't name the host (e.g. a LAN IP), so the pinned one is accepted for any name
+            builder.hostnameVerifier { host, session ->
+                defaultVerifier.verify(host, session) ||
+                    (session.peerCertificates.firstOrNull() as? X509Certificate)?.let { trustManager.isPinned(it) } == true
             }
         }
 
@@ -367,4 +369,49 @@ object BabyBuddyApiClient {
             .build()
             .create(BabyBuddyApiService::class.java)
     }
+}
+
+/** The server's certificate isn't trusted by the system and isn't the pinned one; [fingerprint] is its SHA-256. */
+class UntrustedCertificateException(val fingerprint: String, cause: Throwable? = null) : CertificateException("Untrusted certificate $fingerprint", cause)
+
+/**
+ * Finds the certificate rejection behind a failed call: OkHttp wraps it in an SSLHandshakeException, and when it
+ * tries several addresses (IPv6 then IPv4) it may sit as a suppressed exception under a "connection refused".
+ */
+fun Throwable.findInChain(match: (Throwable) -> Boolean): Throwable? {
+    val seen = mutableSetOf<Throwable>()
+    val queue = ArrayDeque(listOf(this))
+    while (queue.isNotEmpty()) {
+        val t = queue.removeFirst()
+        if (!seen.add(t)) continue
+        if (match(t)) return t
+        t.cause?.let(queue::add)
+        queue.addAll(t.suppressed)
+    }
+    return null
+}
+
+/** SHA-256 of the certificate, as colon-separated hex ("AB:CD:…"), the way browsers show it. */
+fun certificateFingerprint(cert: X509Certificate): String = MessageDigest.getInstance("SHA-256").digest(cert.encoded).joinToString(":") { "%02X".format(it) }
+
+/** Trusts what the system trusts, plus the one self-signed certificate the user confirmed (trust on first use). */
+private class PinningTrustManager(private val pinnedSha256: String) : X509TrustManager {
+    private val system: X509TrustManager = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        .apply { init(null as KeyStore?) }
+        .trustManagers.filterIsInstance<X509TrustManager>().first()
+
+    fun isPinned(cert: X509Certificate) = pinnedSha256.isNotBlank() && certificateFingerprint(cert).equals(pinnedSha256, ignoreCase = true)
+
+    override fun checkClientTrusted(chain: Array<out X509Certificate>, authType: String) = system.checkClientTrusted(chain, authType)
+
+    override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String) {
+        try {
+            system.checkServerTrusted(chain, authType)
+        } catch (e: CertificateException) {
+            val leaf = chain.firstOrNull() ?: throw e
+            if (!isPinned(leaf)) throw UntrustedCertificateException(certificateFingerprint(leaf), e)
+        }
+    }
+
+    override fun getAcceptedIssuers(): Array<X509Certificate> = system.acceptedIssuers
 }
