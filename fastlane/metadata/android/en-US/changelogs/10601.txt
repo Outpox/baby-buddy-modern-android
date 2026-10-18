@@ -1,0 +1,2 @@
+- Settings → You: choose which side the timer widget and Quick Settings tile start a breastfeed on: opposite of the last feed, the same side, always left or always right
+- Shorter README with download and Obtainium badges at the top; feature guides in docs/FEATURES.md, contributing guide in CONTRIBUTING.md

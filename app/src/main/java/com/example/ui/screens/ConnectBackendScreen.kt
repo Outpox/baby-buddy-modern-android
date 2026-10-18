@@ -73,6 +73,7 @@ import com.example.data.ml.RhythmTarget
 import com.example.data.model.BabySex
 import com.example.data.model.ReminderSettings
 import com.example.data.model.ServerConnectionConfig
+import com.example.data.model.StartSide
 import com.example.data.model.ThemeMode
 import com.example.data.model.TrackedItem
 import com.example.data.model.formatMinutes
@@ -162,6 +163,8 @@ fun ConnectBackendScreen(
     feedNotificationEnabled: Boolean = true,
     onFeedNotificationChange: (Boolean) -> Unit = {},
     nextUpNotification: Boolean = false,
+    startSide: StartSide = StartSide.OPPOSITE,
+    onStartSideChange: (StartSide) -> Unit = {},
     onNextUpNotificationChange: (Boolean) -> Unit = {},
     use24h: Boolean = true,
     onUse24hChange: (Boolean) -> Unit = {},
@@ -531,6 +534,37 @@ fun ConnectBackendScreen(
                 selectedIndex = babySex?.let { BabySex.entries.indexOf(it) } ?: -1,
                 onSelect = { onBabySexChange(BabySex.entries[it]) }
             )
+            if (TrackedItem.BREASTFEEDING !in hiddenItems) {
+                Text("Breastfeed start side", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                Text(
+                    "Which side the timer widget and the Quick Settings tile start on. In the app you pick the side yourself.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                StartSide.entries.forEach { side ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = side == startSide, onClick = { onStartSideChange(side) })
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = side == startSide,
+                            onClick = null,
+                            colors = RadioButtonDefaults.colors(selectedColor = PrimaryColor)
+                        )
+                        Column(modifier = Modifier.padding(start = 12.dp)) {
+                            Text(side.label, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                side.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         SettingsSection(

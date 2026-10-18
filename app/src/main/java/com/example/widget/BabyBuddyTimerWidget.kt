@@ -25,7 +25,7 @@ class BabyBuddyTimerWidget : AppWidgetProvider() {
 
         val lastFeed = repo.lastBreastfeed.value
         val lastSide = lastFeed?.lastSide
-        val nextSide = if (lastSide == BreastSide.LEFT) BreastSide.RIGHT else BreastSide.LEFT
+        val nextSide = repo.nextStartSide()
         val activeName = if (timer.activeBreast == BreastSide.LEFT) "Left" else "Right"
         val sessionLabel = when {
             !timer.isRunning -> lastSide?.let { "Last: ${sideName(it)}" } ?: ""

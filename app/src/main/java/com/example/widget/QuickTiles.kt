@@ -17,7 +17,7 @@ import com.example.data.model.TimeFormat
 import com.example.data.repository.BabyBuddyRepository
 
 /**
- * Quick Settings tiles: Breastfeed (start / pause / resume, starting on the side opposite the last feed),
+ * Quick Settings tiles: Breastfeed (start / pause / resume, starting on the side set in Settings → You),
  * Sleep (start / woke up) and Diaper (opens the diaper log). Without a login they open the app.
  * [refreshAll] asks the system to redraw them when a timer changes.
  */
@@ -92,7 +92,7 @@ class FeedTileService : QuickTile() {
             signedOut() -> tile.set("Breastfeed", "Open the app", false, R.drawable.ic_widget_feed)
 
             !t.isRunning -> {
-                val next = if (repo.lastBreastfeed.value?.lastSide == BreastSide.LEFT) "Right" else "Left"
+                val next = if (repo.nextStartSide() == BreastSide.LEFT) "Left" else "Right"
                 tile.set("Breastfeed", "Start $next", false, R.drawable.ic_widget_feed)
             }
 
@@ -106,8 +106,8 @@ class FeedTileService : QuickTile() {
         val repo = BabyBuddyRepository.instance
         val t = repo.liveTimerState.value
         if (!t.isRunning) {
-            // Start on the side opposite the last nursing feed, like the timer widget
-            repo.tapSide(if (repo.lastBreastfeed.value?.lastSide == BreastSide.LEFT) BreastSide.RIGHT else BreastSide.LEFT)
+            // Start on the side from Settings → You, like the timer widget
+            repo.tapSide(repo.nextStartSide())
         } else {
             repo.togglePause()
         }

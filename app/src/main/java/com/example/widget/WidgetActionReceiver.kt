@@ -19,9 +19,8 @@ class WidgetActionReceiver : BroadcastReceiver() {
         when (action) {
             ACTION_TIMER_PAUSE_RESUME -> {
                 if (!repo.liveTimerState.value.isRunning) {
-                    // Start on the side opposite the last nursing feed
-                    val lastSide = repo.lastBreastfeed.value?.lastSide
-                    repo.startNewNursingSession(if (lastSide == BreastSide.LEFT) BreastSide.RIGHT else BreastSide.LEFT)
+                    // Start on the side from Settings → You (by default opposite the last feed)
+                    repo.startNewNursingSession(repo.nextStartSide())
                 } else {
                     repo.togglePause()
                 }

@@ -33,6 +33,7 @@ import com.example.data.model.ReminderSettings
 import com.example.data.model.ServerConnectionConfig
 import com.example.data.model.SleepEvent
 import com.example.data.model.SleepTimerState
+import com.example.data.model.StartSide
 import com.example.data.model.TemperatureEvent
 import com.example.data.model.ThemeMode
 import com.example.data.model.TimeFormat
@@ -336,6 +337,8 @@ class MainViewModel(
     fun setThemeMode(mode: ThemeMode) = repository.setThemeMode(mode)
     fun setFeedNotificationEnabled(enabled: Boolean) = repository.setFeedNotificationEnabled(enabled)
     val nextUpNotification: StateFlow<Boolean> = repository.nextUpNotification
+    val startSide: StateFlow<StartSide> = repository.startSide
+    fun setStartSide(side: StartSide) = repository.setStartSide(side)
     fun setNextUpNotification(enabled: Boolean) = repository.setNextUpNotification(enabled)
 
     /** "While you were away" on Today: what other caregivers logged since this phone left the app. */

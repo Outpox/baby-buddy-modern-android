@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -119,6 +120,13 @@ class BabyBuddyApplication : Application() {
             ) { feed, sleep, signedIn -> Triple(feed, sleep, signedIn) }
                 .distinctUntilChanged()
                 .collect { QuickTile.refreshAll(this@BabyBuddyApplication) }
+        }
+        appScope.launch {
+            // The timer widget and tile show the side a one-tap feed starts on
+            repository.startSide.drop(1).collect {
+                WidgetManagerHelper.updateAllWidgets(this@BabyBuddyApplication)
+                QuickTile.refreshAll(this@BabyBuddyApplication)
+            }
         }
         appScope.launch {
             // Launcher shortcuts: only when signed in, and only for tracked items

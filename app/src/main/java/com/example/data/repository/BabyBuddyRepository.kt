@@ -52,6 +52,7 @@ import com.example.data.model.ServerConnectionConfig
 import com.example.data.model.SleepEvent
 import com.example.data.model.SleepMark
 import com.example.data.model.SleepTimerState
+import com.example.data.model.StartSide
 import com.example.data.model.TemperatureEvent
 import com.example.data.model.ThemeMode
 import com.example.data.model.TimeFormat
@@ -307,6 +308,19 @@ class BabyBuddyRepository {
         _hiddenItems.value = hidden
         prefs?.edit()?.putString(PREF_HIDDEN_ITEMS, hidden.joinToString(",") { it.name })?.apply()
     }
+
+    private val _startSide = MutableStateFlow(StartSide.OPPOSITE)
+
+    /** Which side one-tap feeds start on (timer widget, Quick Settings tile); Settings → You. */
+    val startSide: StateFlow<StartSide> = _startSide.asStateFlow()
+
+    fun setStartSide(side: StartSide) {
+        _startSide.value = side
+        prefs?.edit()?.putString(PREF_START_SIDE, side.name)?.apply()
+    }
+
+    /** The side a one-tap feed starts on now, per [startSide] and the last breastfeed. */
+    fun nextStartSide(): BreastSide = _startSide.value.after(lastBreastfeed.value?.lastSide)
 
     private val _themeMode = MutableStateFlow(ThemeMode.BY_TIME)
 
@@ -2665,6 +2679,7 @@ class BabyBuddyRepository {
             // Remember the wheel/keyboard choice made in any picker
             snapshotFlow { TimeFormat.useWheel }.collect { p.edit().putBoolean(PREF_WHEEL_INPUT, it).apply() }
         }
+        _startSide.value = p.getString(PREF_START_SIDE, null)?.let { runCatching { StartSide.valueOf(it) }.getOrNull() } ?: StartSide.OPPOSITE
         _themeMode.value = p.getString(PREF_THEME_MODE, null)
             ?.let { name -> ThemeMode.entries.firstOrNull { it.name == name } } ?: ThemeMode.BY_TIME
         p.getString(PREF_QUICK_ACTIONS, null)?.let { saved ->
@@ -2963,6 +2978,7 @@ class BabyBuddyRepository {
         private const val PREF_QUICK_ACTIONS = "quick_actions"
         private const val PREF_USE_24H = "use_24h"
         private const val PREF_THEME_MODE = "theme_mode"
+        private const val PREF_START_SIDE = "start_side"
         private val SERVER_COLORS = setOf("black", "brown", "gray", "green", "orange", "red", "white", "yellow")
         private const val PREF_SELF_SIGNED = "allow_self_signed"
         private const val PREF_CERT_PIN = "pinned_cert_sha256"

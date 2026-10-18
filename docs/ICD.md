@@ -100,6 +100,7 @@ Failure behavior: push/poll are best-effort; a lost push is healed by the next l
 
 - No websocket/push channel; multi-device liveness comes from timer polling (every 15 s while resumed) plus refresh intervals.
 - Home-screen widgets, notifications and reminders are device-local outputs; they never touch the network directly.
+- **Settings kept only on the phone** (never sent to the server, which has no fields for them): caregiver name (it is only written into entries' notes, §5), breastfeed start side, theme, clock format, reminders, tracked items, Today cards, saved rhythm models, and the boy/girl choice used to pick the WHO growth charts.
 
 ## 8. References
 

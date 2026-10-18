@@ -229,6 +229,22 @@ enum class TrackedItem(val label: String, val description: String) {
     GROWTH("Growth", "Weight, length and head circumference, with WHO charts in Trends")
 }
 
+/** Which side a one-tap breastfeed starts on (timer widget, Quick Settings tile); Settings → You. */
+enum class StartSide(val label: String, val description: String) {
+    OPPOSITE("Opposite of the last feed", "Alternate sides: start where the last feed didn't end"),
+    SAME("Same as the last feed", "Start on the side the last feed ended on"),
+    LEFT("Always left", "Start every feed on the left"),
+    RIGHT("Always right", "Start every feed on the right");
+
+    /** The side to start on, given the side the last breastfeed ended on (null if unknown: left). */
+    fun after(lastSide: BreastSide?): BreastSide = when (this) {
+        OPPOSITE -> if (lastSide == BreastSide.LEFT) BreastSide.RIGHT else BreastSide.LEFT
+        SAME -> if (lastSide == BreastSide.RIGHT) BreastSide.RIGHT else BreastSide.LEFT
+        LEFT -> BreastSide.LEFT
+        RIGHT -> BreastSide.RIGHT
+    }
+}
+
 /** Light/dark choice (Settings → Appearance). */
 enum class ThemeMode(val label: String, val description: String) {
     BY_TIME("By time of day", "Dark from 20:00 to 07:00"),

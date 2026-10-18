@@ -240,6 +240,7 @@ fun BabyBuddyApp(
     val caregiverName by viewModel.caregiverName.collectAsState()
     val feedNotificationEnabled by viewModel.feedNotificationEnabled.collectAsState()
     val nextUpNotification by viewModel.nextUpNotification.collectAsState()
+    val startSide by viewModel.startSide.collectAsState()
     val handoff by viewModel.handoff.collectAsState()
     val use24h by viewModel.use24h.collectAsState()
     val modelsTab by viewModel.modelsTab.collectAsState()
@@ -577,6 +578,8 @@ fun BabyBuddyApp(
                             if (enabled) (context as? MainActivity)?.requestNotificationPermission()
                         },
                         nextUpNotification = nextUpNotification,
+                        startSide = startSide,
+                        onStartSideChange = { viewModel.setStartSide(it) },
                         onNextUpNotificationChange = { enabled ->
                             viewModel.setNextUpNotification(enabled)
                             if (enabled) (context as? MainActivity)?.requestNotificationPermission()
