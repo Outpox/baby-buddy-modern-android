@@ -57,7 +57,6 @@ Details and screenshots: **[docs/FEATURES.md](docs/FEATURES.md)** (widgets, lock
 2. **Install** the APK from the [latest release](https://github.com/liorbass/baby-buddy-modern-android/releases/latest), or with [Obtainium](https://github.com/ImranR98/Obtainium) for automatic updates (badge above, or add this repository's URL; config in [`docs/obtainium/`](docs/obtainium/dev.liorbass.babybuddy.json)). Android 7.0+.
 3. **Log in** with your server URL (e.g. `https://baby.example.com`) and API token (Baby Buddy web UI → your user profile). Optional: a Cloudflare Access service token. For a self-signed certificate, turn on **Allow self-signed certificates**: the app shows the certificate's fingerprint once and then trusts only that certificate. Plain `http://` works on a home network, but sends the token unencrypted.
 
-From 1.1.0 the app ID is `dev.liorbass.babybuddy`; 1.0.x used a different ID, so uninstall it after moving over.
 
 Building from source and contributing: **[CONTRIBUTING.md](CONTRIBUTING.md)**. How the app uses the server's API and which fields carry what: [docs/ICD.md](docs/ICD.md). Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
