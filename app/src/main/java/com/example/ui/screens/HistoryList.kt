@@ -32,12 +32,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BATH_NOTE_TEXT
 import com.example.data.model.DiaperEvent
 import com.example.data.model.DiaperType
 import com.example.data.model.FeedType
 import com.example.data.model.FeedingEvent
+import com.example.data.model.GrowthEvent
 import com.example.data.model.HistoryDay
 import com.example.data.model.NoteEvent
 import com.example.data.model.PumpingEvent
@@ -45,6 +47,7 @@ import com.example.data.model.SleepEvent
 import com.example.data.model.TimeFormat
 import com.example.data.model.TrackedItem
 import com.example.data.model.TummyTimeEvent
+import com.example.data.model.formatGrowth
 import com.example.data.model.formatMinutes
 import com.example.ui.HistoryFilter
 import com.example.ui.theme.ItemColors
@@ -73,8 +76,36 @@ private data class HistoryEntry(
     val onClick: () -> Unit
 )
 
-/** "Alex · first line of the note": who logged it, then the note. */
-private fun whoAndNote(caregiver: String?, notes: String): String = listOfNotNull(caregiver, notes.lineSequence().firstOrNull { it.isNotBlank() }).joinToString(" · ")
+/** "Alex · the note": who logged it, then the whole note (its lines run together). */
+private fun whoAndNote(caregiver: String?, notes: String): String = listOfNotNull(
+    caregiver,
+    notes.lines().map { it.trim() }.filter { it.isNotBlank() }.joinToString(" ").takeIf { it.isNotBlank() }
+).joinToString(" · ")
+
+/** "Dirty · Mustard · Seedy": the type, then the stool color and consistency when recorded. */
+private fun diaperDetail(d: DiaperEvent): String {
+    val stool = d.type == DiaperType.DIRTY || d.type == DiaperType.BOTH
+    return listOfNotNull(
+        d.type.name.lowercase().replaceFirstChar(Char::uppercase),
+        d.color.takeIf { stool && it.isNotBlank() },
+        d.consistency.substringBefore(" / ").takeIf { stool && it.isNotBlank() }
+    ).joinToString(" · ")
+}
+
+/** Rash and cream, then who logged it and the note. */
+private fun diaperSubtitle(d: DiaperEvent): String = listOfNotNull(
+    "Rash".takeIf { d.rashPresent },
+    d.skinBarrierApplied.takeIf { it.isNotEmpty() }?.joinToString(", ") { it.substringBefore(" / ") },
+    whoAndNote(d.caregiver, d.notes).takeIf { it.isNotBlank() }
+).joinToString(" · ")
+
+private fun localDayStart(millis: Long): Long = Calendar.getInstance().apply {
+    timeInMillis = millis
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.timeInMillis
 
 private fun sideLabel(feed: FeedingEvent): String {
     val sides = feed.sides
@@ -87,6 +118,7 @@ private fun sideLabel(feed: FeedingEvent): String {
 
 private fun entriesOf(
     day: HistoryDay,
+    growth: List<GrowthEvent>, // this day's measurements
     filter: HistoryFilter,
     onFeeding: (FeedingEvent) -> Unit,
     onDiaper: (DiaperEvent) -> Unit,
@@ -94,7 +126,8 @@ private fun entriesOf(
     onPumping: (PumpingEvent) -> Unit,
     onSleep: (SleepEvent) -> Unit,
     onBath: (NoteEvent) -> Unit = {},
-    onNote: (NoteEvent) -> Unit = {}
+    onNote: (NoteEvent) -> Unit = {},
+    onGrowth: (GrowthEvent) -> Unit = {}
 ): List<HistoryEntry> {
     val out = mutableListOf<HistoryEntry>()
     if (filter == HistoryFilter.ALL || filter == HistoryFilter.FEEDS) {
@@ -123,8 +156,8 @@ private fun entriesOf(
                 timeMillis = d.timeMillis,
                 time = d.timeFormatted,
                 title = "Diaper",
-                detail = d.type.name.lowercase().replaceFirstChar(Char::uppercase),
-                subtitle = whoAndNote(d.caregiver, d.notes),
+                detail = diaperDetail(d),
+                subtitle = diaperSubtitle(d),
                 dot = when (d.type) {
                     DiaperType.WET -> ItemColors.tint(TrackedItem.DIAPERS).copy(alpha = 0.4f)
                     DiaperType.DIRTY, DiaperType.BOTH -> ItemColors.tint(TrackedItem.DIAPERS)
@@ -184,9 +217,23 @@ private fun entriesOf(
                 time = b.timeFormatted,
                 title = "Bath",
                 detail = "",
-                subtitle = if (b.text == BATH_NOTE_TEXT) "" else b.text.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty(),
+                subtitle = if (b.text == BATH_NOTE_TEXT) "" else whoAndNote(null, b.text),
                 dot = ItemColors.tint(TrackedItem.BATH),
                 onClick = { onBath(b) }
+            )
+        }
+    }
+    if (filter == HistoryFilter.ALL || filter == HistoryFilter.GROWTH) {
+        growth.forEach { g ->
+            out += HistoryEntry(
+                key = "growth_${g.id}",
+                timeMillis = g.dateMillis,
+                time = "", // the server keeps only the date
+                title = g.kind.label,
+                detail = formatGrowth(g.kind, g.value),
+                subtitle = whoAndNote(g.caregiver, g.notes),
+                dot = ItemColors.tint(TrackedItem.GROWTH),
+                onClick = { onGrowth(g) }
             )
         }
     }
@@ -221,6 +268,7 @@ internal fun historyFiltersFor(hidden: Set<TrackedItem>): List<HistoryFilter> = 
         HistoryFilter.TUMMY -> TrackedItem.TUMMY_TIME !in hidden
         HistoryFilter.SLEEP -> TrackedItem.SLEEP !in hidden
         HistoryFilter.BATH -> TrackedItem.BATH !in hidden
+        HistoryFilter.GROWTH -> TrackedItem.GROWTH !in hidden
         HistoryFilter.NOTES -> true
     }
 }
@@ -242,7 +290,7 @@ internal fun HistoryDay.withoutHidden(hidden: Set<TrackedItem>): HistoryDay = if
 }
 
 /** A short summary for a day's header, matching the filter. */
-private fun daySummary(day: HistoryDay, filter: HistoryFilter): String = when (filter) {
+private fun daySummary(day: HistoryDay, growth: List<GrowthEvent>, filter: HistoryFilter): String = when (filter) {
     HistoryFilter.ALL -> listOf(
         "${day.feedings.size} feeds",
         "${day.diapers.size} diapers"
@@ -268,6 +316,8 @@ private fun daySummary(day: HistoryDay, filter: HistoryFilter): String = when (f
     HistoryFilter.SLEEP -> "${formatMinutes(day.sleeps.sumOf { it.durationMinutes })} asleep"
 
     HistoryFilter.BATH -> if (day.baths.size == 1) "1 bath" else "${day.baths.size} baths"
+
+    HistoryFilter.GROWTH -> if (growth.size == 1) "1 measurement" else "${growth.size} measurements"
 
     HistoryFilter.NOTES -> if (day.notes.size == 1) "1 note" else "${day.notes.size} notes"
 }
@@ -370,21 +420,31 @@ internal fun HistoryList(
     onSleepClick: (SleepEvent) -> Unit = {},
     onBathClick: (NoteEvent) -> Unit = {},
     onNoteClick: (NoteEvent) -> Unit = {},
+    growth: List<GrowthEvent> = emptyList(),
+    onGrowthClick: (GrowthEvent) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val grouped = days.sortedByDescending { it.dayStartMillis }.map { day ->
-        day to entriesOf(day, filter, onFeedingClick, onDiaperClick, onTummyClick, onPumpingClick, onSleepClick, onBathClick, onNoteClick)
+    // Measurements are rare (monthly), so the Growth filter lists all of them rather than the week's
+    val growthByDay = growth.groupBy { localDayStart(it.dateMillis) }
+    val shownDays = if (filter == HistoryFilter.GROWTH) growthByDay.keys.map { HistoryDay(dayStartMillis = it) } else days
+    val grouped = shownDays.sortedByDescending { it.dayStartMillis }.map { day ->
+        val dayGrowth = growthByDay[day.dayStartMillis].orEmpty()
+        Triple(
+            day,
+            dayGrowth,
+            entriesOf(day, dayGrowth, filter, onFeedingClick, onDiaperClick, onTummyClick, onPumpingClick, onSleepClick, onBathClick, onNoteClick, onGrowthClick)
+        )
     }
-    val anything = grouped.any { it.second.isNotEmpty() }
+    val anything = grouped.any { it.third.isNotEmpty() }
 
     LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!anything) {
             item {
                 Text(
-                    text = if (filter == HistoryFilter.ALL) {
-                        "Nothing logged these 7 days."
-                    } else {
-                        "No ${filter.label.lowercase()} logged these 7 days."
+                    text = when (filter) {
+                        HistoryFilter.ALL -> "Nothing logged these 7 days."
+                        HistoryFilter.GROWTH -> "No growth measurements yet."
+                        else -> "No ${filter.label.lowercase()} logged these 7 days."
                     },
                     style = MaterialTheme.typography.bodyLarge,
                     color = OnSurfaceVariant,
@@ -395,7 +455,7 @@ internal fun HistoryList(
                 )
             }
         }
-        grouped.forEach { (day, entries) ->
+        grouped.forEach { (day, dayGrowth, entries) ->
             if (entries.isEmpty()) return@forEach
             item(key = "day_${day.dayStartMillis}") {
                 Row(
@@ -410,7 +470,7 @@ internal fun HistoryList(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
-                    Text(daySummary(day, filter), style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                    Text(daySummary(day, dayGrowth, filter), style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
                 }
             }
             items(entries, key = { it.key }) { entry -> HistoryRow(entry) }
@@ -446,7 +506,13 @@ private fun HistoryRow(entry: HistoryEntry) {
                 maxLines = 1
             )
             if (entry.subtitle.isNotBlank()) {
-                Text(entry.subtitle, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1)
+                Text(
+                    entry.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

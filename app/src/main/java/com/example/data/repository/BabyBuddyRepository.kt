@@ -1753,6 +1753,13 @@ class BabyBuddyRepository {
         return event.id
     }
 
+    /** Saves a changed measurement (value, day or note); the day is kept as local noon like the server's date. */
+    fun updateGrowth(updated: GrowthEvent) {
+        val event = updated.copy(dateMillis = parseLocalDateNoon(localDate(updated.dateMillis)) ?: updated.dateMillis)
+        _growth.update { list -> list.map { if (it.id == event.id) event else it }.sortedByDescending { it.dateMillis } }
+        enqueue(QueuedWrite(event.kind.endpoint, QueuedWrite.ACTION_UPDATE, event.id, knownServerId(event.id, event.serverId), growthBody(event)))
+    }
+
     fun deleteGrowth(id: Long) {
         val event = _growth.value.firstOrNull { it.id == id } ?: return
         _growth.update { list -> list.filterNot { it.id == id } }

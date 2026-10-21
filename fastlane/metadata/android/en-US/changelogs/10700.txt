@@ -1,0 +1,3 @@
+- Edit or delete growth measurements (weight, length, head): from History's new Growth filter, or by tapping a point on the Trends growth chart
+- Log screen diaper form: dry, plus optional stool consistency and color
+- History shows diaper color, consistency, rash and cream, and each entry's full note, without opening it

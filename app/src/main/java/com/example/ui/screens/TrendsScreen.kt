@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,6 +50,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -64,6 +67,7 @@ import com.example.data.model.ageInDays
 import com.example.data.model.formatGrowth
 import com.example.data.model.growthPercentile
 import com.example.data.model.ordinalPercentile
+import com.example.ui.components.EditGrowthDialog
 import com.example.ui.components.SegmentedToggle
 import com.example.ui.components.shortDate
 import com.example.ui.theme.ItemColors
@@ -105,6 +109,8 @@ fun TrendsScreen(
     birthDate: String? = null,
     babySex: BabySex? = null,
     onBabySexChange: (BabySex) -> Unit = {},
+    onUpdateGrowth: (GrowthEvent) -> Unit = {},
+    onDeleteGrowth: (GrowthEvent) -> Unit = {},
     modelsTab: (@Composable () -> Unit)? = null // the Models tab's content, when turned on in Settings
 ) {
     var showModels by rememberSaveable { mutableStateOf(false) }
@@ -184,7 +190,14 @@ fun TrendsScreen(
             // By age, not by the selected range, so it shows whatever the range or loading state
             if (TrackedItem.GROWTH !in hiddenItems) {
                 item(key = "growth") {
-                    GrowthSection(growth = growth, birthDate = birthDate, sex = babySex, onSexChange = onBabySexChange)
+                    GrowthSection(
+                        growth = growth,
+                        birthDate = birthDate,
+                        sex = babySex,
+                        onSexChange = onBabySexChange,
+                        onUpdate = onUpdateGrowth,
+                        onDelete = onDeleteGrowth
+                    )
                 }
             }
         }
@@ -1162,9 +1175,26 @@ private fun GrowthSection(
     growth: List<GrowthEvent>,
     birthDate: String?,
     sex: BabySex?,
-    onSexChange: (BabySex) -> Unit
+    onSexChange: (BabySex) -> Unit,
+    onUpdate: (GrowthEvent) -> Unit,
+    onDelete: (GrowthEvent) -> Unit
 ) {
     var kindIndex by rememberSaveable { mutableIntStateOf(0) }
+    var editing by remember { mutableStateOf<GrowthEvent?>(null) }
+    editing?.let { event ->
+        EditGrowthDialog(
+            event = event,
+            onDismiss = { editing = null },
+            onSave = {
+                onUpdate(it)
+                editing = null
+            },
+            onDelete = {
+                onDelete(event)
+                editing = null
+            }
+        )
+    }
     val kind = GrowthKind.entries[kindIndex]
     val points = growth.filter { it.kind == kind }.sortedBy { it.dateMillis }
     val ageNow = birthDate?.let { ageInDays(it, System.currentTimeMillis()) }
@@ -1201,7 +1231,7 @@ private fun GrowthSection(
                     )
 
                     else -> {
-                        GrowthChart(kind = kind, sex = sex, birthDate = birthDate, ageNow = ageNow, points = points)
+                        GrowthChart(kind = kind, sex = sex, birthDate = birthDate, ageNow = ageNow, points = points, onPointClick = { editing = it })
                         Spacer(modifier = Modifier.height(12.dp))
                         GrowthLegend()
                         Spacer(modifier = Modifier.height(12.dp))
@@ -1226,7 +1256,7 @@ private fun growthCaption(kind: GrowthKind, points: List<GrowthEvent>, birthDate
         growthPercentile(prev, birthDate, sex)?.let { " (${ordinalPercentile(it)} on ${shortDate(prev.dateMillis)})" }
     }.orEmpty()
     return "Latest: ${formatGrowth(kind, latest.value)} on ${shortDate(latest.dateMillis)}, " +
-        "${ordinalPercentile(p)} percentile$previous."
+        "${ordinalPercentile(p)} percentile$previous. Tap a point to edit it."
 }
 
 @Composable
@@ -1248,10 +1278,18 @@ private fun GrowthLegend() {
 
 /** WHO percentile curves (3rd, 15th, 50th, 85th, 97th) by age in months, with the baby's measurements on top. */
 @Composable
-private fun GrowthChart(kind: GrowthKind, sex: BabySex, birthDate: String, ageNow: Double, points: List<GrowthEvent>) {
-    val dataPts = points.mapNotNull { e ->
-        ageInDays(birthDate, e.dateMillis)?.takeIf { it <= WhoGrowthStandards.MAX_DAYS }?.let { it to e.value }
+private fun GrowthChart(
+    kind: GrowthKind,
+    sex: BabySex,
+    birthDate: String,
+    ageNow: Double,
+    points: List<GrowthEvent>,
+    onPointClick: (GrowthEvent) -> Unit
+) {
+    val charted = points.mapNotNull { e ->
+        ageInDays(birthDate, e.dateMillis)?.takeIf { it <= WhoGrowthStandards.MAX_DAYS }?.let { e to it }
     }
+    val dataPts = charted.map { (e, day) -> day to e.value }
     // Birth to a little past now (at least 3 months, at most 2 years), in whole months
     val furthest = maxOf(ageNow, dataPts.maxOfOrNull { it.first } ?: 0.0)
     val months = ceil(maxOf(furthest * 1.25, 91.0) / DAYS_PER_MONTH).coerceAtMost(24.0)
@@ -1282,6 +1320,19 @@ private fun GrowthChart(kind: GrowthKind, sex: BabySex, birthDate: String, ageNo
         modifier = Modifier
             .fillMaxWidth()
             .height(240.dp)
+            // Tap a measurement (the nearest one within reach) to edit it
+            .pointerInput(charted, xMax, yMin, yMax) {
+                detectTapGestures { tap ->
+                    // Same insets as the drawing below
+                    val w = size.width - 34.dp.toPx() - 26.dp.toPx()
+                    val h = size.height - 8.dp.toPx() - 20.dp.toPx()
+                    fun at(day: Double, v: Double) = Offset(34.dp.toPx() + (day / xMax * w).toFloat(), 8.dp.toPx() + ((yMax - v) / (yMax - yMin) * h).toFloat())
+                    charted.map { (e, day) -> e to (at(day, e.value) - tap).getDistance() }
+                        .filter { it.second <= 28.dp.toPx() }
+                        .minByOrNull { it.second }
+                        ?.let { onPointClick(it.first) }
+                }
+            }
     ) {
         val left = 34.dp.toPx()
         val right = 26.dp.toPx()

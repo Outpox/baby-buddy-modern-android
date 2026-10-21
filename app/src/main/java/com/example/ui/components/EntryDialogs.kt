@@ -28,17 +28,21 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -216,25 +220,52 @@ fun PumpingForm(initialMl: Int, initialMinutes: Int, onCancel: () -> Unit, onSav
     }
 }
 
-/** Quick diaper entry: time (default now), wet / dirty / both, note. */
+/** Quick diaper entry: time (default now), wet / dirty / both / dry, stool consistency and color, note. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun DiaperQuickForm(onCancel: () -> Unit, onSave: (type: DiaperType, notes: String, timeMillis: Long?) -> Unit) {
+fun DiaperQuickForm(
+    onCancel: () -> Unit,
+    onSave: (type: DiaperType, consistency: String, color: String, notes: String, timeMillis: Long?) -> Unit
+) {
     var type by remember { mutableStateOf(DiaperType.WET) }
+    var consistency by remember { mutableStateOf("") } // optional; "" = not recorded
+    var color by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var pickedTime by remember { mutableStateOf<Long?>(null) } // null = now
-    val types = listOf(DiaperType.WET, DiaperType.DIRTY, DiaperType.BOTH)
+    val showStool = type == DiaperType.DIRTY || type == DiaperType.BOTH
     Column {
         NowTimeField(label = "Changed", picked = pickedTime, onChange = { pickedTime = it })
         Spacer(Modifier.height(16.dp))
         SegmentedToggle(
-            options = listOf("Wet", "Dirty", "Both"),
-            selectedIndex = types.indexOf(type).coerceAtLeast(0),
-            onSelect = { type = types[it] }
+            options = listOf("Wet", "Dirty", "Both", "Dry"),
+            selectedIndex = DiaperType.entries.indexOf(type).coerceAtLeast(0),
+            onSelect = { type = DiaperType.entries[it] }
         )
+        if (showStool) {
+            Spacer(Modifier.height(16.dp))
+            SectionLabel("Consistency (optional)")
+            ChipGroup(
+                options = CONSISTENCY_OPTIONS,
+                isSelected = { it == consistency },
+                onToggle = { value -> consistency = if (consistency == value) "" else value }
+            )
+            Spacer(Modifier.height(12.dp))
+            SectionLabel("Color (optional)")
+            ChipGroup(
+                options = COLOR_OPTIONS.map { it to it },
+                isSelected = { it == color },
+                onToggle = { value -> color = if (color == value) "" else value }
+            )
+        }
         Spacer(Modifier.height(20.dp))
         NotesField(value = notes, onChange = { notes = it }, placeholderText = "Note (optional)")
         Spacer(Modifier.height(24.dp))
-        CancelSaveRow(onCancel = onCancel, onSave = { onSave(type, notes.trim(), pickedTime) })
+        CancelSaveRow(
+            onCancel = onCancel,
+            onSave = {
+                onSave(type, if (showStool) consistency else "", if (showStool) color else "", notes.trim(), pickedTime)
+            }
+        )
     }
 }
 
@@ -325,6 +356,115 @@ fun GrowthDialog(
         Spacer(Modifier.height(16.dp))
         GrowthForm(latest = latest, onCancel = onDismiss, onSave = onSave)
     }
+}
+
+/** Edit or delete one measurement: its value, day (the server keeps only the date) and note. */
+@Composable
+fun EditGrowthDialog(event: GrowthEvent, onDismiss: () -> Unit, onSave: (GrowthEvent) -> Unit, onDelete: () -> Unit) {
+    val kind = event.kind
+    var text by remember(event.id) { mutableStateOf(formatGrowth(kind, event.value).removeSuffix(" ${kind.unit}")) }
+    var date by remember(event.id) { mutableLongStateOf(event.dateMillis) }
+    var notes by remember(event.id) { mutableStateOf(event.notes) }
+    val parsed = parseGrowth(kind, text)
+    DialogFrame(onDismiss = onDismiss) {
+        DialogTitle("Edit ${kind.label.lowercase()}")
+        event.caregiver?.let {
+            Spacer(Modifier.height(4.dp))
+            Text("Logged by $it", style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+        }
+        Spacer(Modifier.height(16.dp))
+        OutlinedTextField(
+            value = text,
+            onValueChange = { v -> text = v.filter { it.isDigit() || it == '.' || it == ',' }.take(6) },
+            label = { Text(kind.label) },
+            suffix = { Text(kind.unit) },
+            isError = parsed == null,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(12.dp))
+        DateField(label = "Date", millis = date, onChange = { date = it })
+        Spacer(Modifier.height(16.dp))
+        NotesField(value = notes, onChange = { notes = it })
+        Spacer(Modifier.height(20.dp))
+        DeleteSaveRow(
+            onDelete = onDelete,
+            onSave = { if (parsed != null) onSave(event.copy(value = parsed, dateMillis = date, notes = notes.trim())) }
+        )
+    }
+}
+
+/** "Date    30 Sep ✎": tap to pick a day (not in the future). [millis] and the result are local noon of that day. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateField(label: String, millis: Long, onChange: (Long) -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    if (picking) {
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = localToUtcDate(millis),
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long) = utcTimeMillis <= localToUtcDate(System.currentTimeMillis())
+            }
+        )
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(
+                    enabled = state.selectedDateMillis != null,
+                    onClick = {
+                        picking = false
+                        onChange(utcDateToLocalNoon(state.selectedDateMillis!!))
+                    }
+                ) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } }
+        ) {
+            DatePicker(state = state)
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(SurfaceContainer)
+            .clickable { picking = true }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = OnSurface, modifier = Modifier.weight(1f))
+        Text(
+            SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(millis)),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = PrimaryColor
+        )
+        Icon(
+            Icons.Default.Edit,
+            contentDescription = "Change $label",
+            tint = OnSurfaceVariant,
+            modifier = Modifier.padding(start = 8.dp).size(18.dp)
+        )
+    }
+}
+
+/** The local calendar day of [millis] as UTC midnight (what the Material date picker uses). */
+private fun localToUtcDate(millis: Long): Long {
+    val local = Calendar.getInstance().apply { timeInMillis = millis }
+    return Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(local.get(Calendar.YEAR), local.get(Calendar.MONTH), local.get(Calendar.DAY_OF_MONTH))
+    }.timeInMillis
+}
+
+/** A date picker's UTC midnight as local noon of the same calendar day. */
+private fun utcDateToLocalNoon(utcMillis: Long): Long {
+    val utc = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+    return Calendar.getInstance().apply {
+        clear()
+        set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH), 12, 0)
+    }.timeInMillis
 }
 
 /** The newest measurement of each kind. */

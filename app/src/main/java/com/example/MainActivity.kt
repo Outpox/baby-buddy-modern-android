@@ -377,6 +377,8 @@ fun BabyBuddyApp(
                         birthDate = babyProfile.birthDate,
                         babySex = babySex,
                         onBabySexChange = { viewModel.setBabySex(it) },
+                        onUpdateGrowth = { viewModel.updateGrowth(it) },
+                        onDeleteGrowth = { viewModel.deleteGrowth(it) },
                         modelsTab = if (modelsTab) {
                             {
                                 RhythmModelsTab(
@@ -459,12 +461,12 @@ fun BabyBuddyApp(
                         },
                         lastPumpMl = recentPumpings.firstOrNull()?.amountMl ?: 120,
                         lastPumpMinutes = recentPumpings.firstOrNull()?.durationMinutes?.takeIf { it > 0 } ?: 20,
-                        onLogDiaper = { type, notes, time ->
+                        onLogDiaper = { type, consistency, color, notes, time ->
                             viewModel.saveDiaperChange(
                                 type = type,
                                 amount = "",
-                                consistency = "",
-                                color = "",
+                                consistency = consistency,
+                                color = color,
                                 rashPresent = false,
                                 skinBarriers = emptyList(),
                                 timeMillis = time,
@@ -519,6 +521,9 @@ fun BabyBuddyApp(
                         onDeleteSleep = { viewModel.deleteSleep(it) },
                         onUpdateNote = { viewModel.updateNote(it) },
                         onDeleteNote = { viewModel.deleteNoteEntry(it) },
+                        growth = growth,
+                        onUpdateGrowth = { viewModel.updateGrowth(it) },
+                        onDeleteGrowth = { viewModel.deleteGrowth(it) },
                         hiddenItems = hiddenItems
                     )
                 }

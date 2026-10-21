@@ -59,6 +59,7 @@ import com.example.data.model.DiaperEvent
 import com.example.data.model.DiaperType
 import com.example.data.model.FeedType
 import com.example.data.model.FeedingEvent
+import com.example.data.model.GrowthEvent
 import com.example.data.model.HistoryDay
 import com.example.data.model.NoteEvent
 import com.example.data.model.PumpingEvent
@@ -70,6 +71,7 @@ import com.example.ui.HistoryFilter
 import com.example.ui.components.EditBathDialog
 import com.example.ui.components.EditDiaperDialog
 import com.example.ui.components.EditFeedingDialog
+import com.example.ui.components.EditGrowthDialog
 import com.example.ui.components.EditNoteDialog
 import com.example.ui.components.EditPumpingDialog
 import com.example.ui.components.EditSleepDialog
@@ -173,6 +175,9 @@ fun HistoryScreen(
     onDeleteSleep: (Long) -> Unit = {},
     onUpdateNote: (NoteEvent) -> Unit = {}, // notes and baths
     onDeleteNote: (NoteEvent) -> Unit = {},
+    growth: List<GrowthEvent> = emptyList(), // every measurement (not loaded per week)
+    onUpdateGrowth: (GrowthEvent) -> Unit = {},
+    onDeleteGrowth: (GrowthEvent) -> Unit = {},
     hiddenItems: Set<TrackedItem> = emptySet(),
     modifier: Modifier = Modifier
 ) {
@@ -192,6 +197,7 @@ fun HistoryScreen(
     var editingSleep by remember { mutableStateOf<SleepEvent?>(null) }
     var editingBath by remember { mutableStateOf<NoteEvent?>(null) }
     var editingNote by remember { mutableStateOf<NoteEvent?>(null) }
+    var editingGrowth by remember { mutableStateOf<GrowthEvent?>(null) }
 
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -275,12 +281,15 @@ fun HistoryScreen(
                         .padding(horizontal = 16.dp)
                 ) {
                     HistoryFilterChips(selected = filter, onSelect = onFilterChange, available = filters)
-                    HistoryWeekNav(
-                        days = days,
-                        isCurrentWeek = isCurrentWeek,
-                        onPreviousWeek = onPreviousWeek,
-                        onNextWeek = onNextWeek
-                    )
+                    // Growth lists every measurement, so weeks don't apply
+                    if (filter != HistoryFilter.GROWTH) {
+                        HistoryWeekNav(
+                            days = days,
+                            isCurrentWeek = isCurrentWeek,
+                            onPreviousWeek = onPreviousWeek,
+                            onNextWeek = onNextWeek
+                        )
+                    }
                     if (error != null) {
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -303,6 +312,8 @@ fun HistoryScreen(
                         onSleepClick = { editingSleep = it },
                         onBathClick = { editingBath = it },
                         onNoteClick = { editingNote = it },
+                        growth = if (TrackedItem.GROWTH in hiddenItems) emptyList() else growth,
+                        onGrowthClick = { editingGrowth = it },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -459,6 +470,20 @@ fun HistoryScreen(
             onDelete = {
                 onDeleteNote(note)
                 editingNote = null
+            }
+        )
+    }
+    editingGrowth?.let { event ->
+        EditGrowthDialog(
+            event = event,
+            onDismiss = { editingGrowth = null },
+            onSave = {
+                onUpdateGrowth(it)
+                editingGrowth = null
+            },
+            onDelete = {
+                onDeleteGrowth(event)
+                editingGrowth = null
             }
         )
     }

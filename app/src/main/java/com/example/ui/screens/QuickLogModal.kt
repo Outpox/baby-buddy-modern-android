@@ -102,7 +102,7 @@ fun QuickLogModal(
     lastBreastfeed: FeedingEvent? = null,
     onSetSideSeconds: (BreastSide, Int) -> Unit = { _, _ -> },
     onSetFeedStart: (Long) -> Unit = {},
-    onLogDiaper: (type: DiaperType, notes: String, timeMillis: Long?) -> Unit = { _, _, _ -> },
+    onLogDiaper: (type: DiaperType, consistency: String, color: String, notes: String, timeMillis: Long?) -> Unit = { _, _, _, _, _ -> },
     liveFeedNotes: String = "",
     onLiveFeedNotesChange: (String) -> Unit = {},
     hiddenItems: Set<TrackedItem> = emptySet(),
@@ -212,7 +212,7 @@ fun QuickLogModal(
 
                 LogEntry.DIAPER -> LogSection(
                     label = entry.label,
-                    subtitle = "Wet, dirty or both",
+                    subtitle = "Wet, dirty, both or dry",
                     icon = painterResource(R.drawable.ic_widget_diaper),
                     tint = ItemColors.tint(entry.item),
                     expanded = expanded,
@@ -220,9 +220,9 @@ fun QuickLogModal(
                 ) {
                     DiaperQuickForm(
                         onCancel = { open = null },
-                        onSave = { type, notes, time ->
+                        onSave = { type, consistency, color, notes, time ->
                             open = null
-                            onLogDiaper(type, notes, time)
+                            onLogDiaper(type, consistency, color, notes, time)
                         }
                     )
                 }

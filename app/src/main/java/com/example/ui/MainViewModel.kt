@@ -81,6 +81,7 @@ enum class HistoryFilter(val label: String) {
     TUMMY("Tummy time"),
     SLEEP("Sleep"),
     BATH("Baths"),
+    GROWTH("Growth"), // every measurement, not just the week's
     NOTES("Notes")
 }
 
@@ -700,6 +701,17 @@ class MainViewModel(
         val ids = values.map { (kind, value) -> repository.logGrowth(kind, value, dateMillis ?: System.currentTimeMillis(), notes) }
         val text = values.entries.joinToString(", ") { (kind, value) -> formatGrowth(kind, value) }
         showToast("Growth logged: $text", undo = { ids.forEach(repository::deleteGrowth) })
+    }
+
+    /** Saves a changed measurement (from History or the Trends chart). */
+    fun updateGrowth(event: GrowthEvent) {
+        repository.updateGrowth(event)
+        showToast("${event.kind.label} updated")
+    }
+
+    fun deleteGrowth(event: GrowthEvent) {
+        repository.deleteGrowth(event.id)
+        showToast("${event.kind.label} deleted")
     }
 
     // Baths (notes tagged "bath")
