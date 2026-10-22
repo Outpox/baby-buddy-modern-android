@@ -698,9 +698,9 @@ class MainViewModel(
     /** Logs the measurements taken together (any of weight, length, head) as one entry each. */
     fun logGrowth(values: Map<GrowthKind, Double>, dateMillis: Long?, notes: String = "") {
         if (values.isEmpty()) return
-        val ids = values.map { (kind, value) -> repository.logGrowth(kind, value, dateMillis ?: System.currentTimeMillis(), notes) }
+        val ids = values.map { (kind, value) -> kind to repository.logGrowth(kind, value, dateMillis ?: System.currentTimeMillis(), notes) }
         val text = values.entries.joinToString(", ") { (kind, value) -> formatGrowth(kind, value) }
-        showToast("Growth logged: $text", undo = { ids.forEach(repository::deleteGrowth) })
+        showToast("Growth logged: $text", undo = { ids.forEach { (kind, id) -> repository.deleteGrowth(kind, id) } })
     }
 
     /** Saves a changed measurement (from History or the Trends chart). */
@@ -710,7 +710,7 @@ class MainViewModel(
     }
 
     fun deleteGrowth(event: GrowthEvent) {
-        repository.deleteGrowth(event.id)
+        repository.deleteGrowth(event.kind, event.id)
         showToast("${event.kind.label} deleted")
     }
 

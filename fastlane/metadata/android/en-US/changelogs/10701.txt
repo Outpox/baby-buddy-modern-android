@@ -1,0 +1,1 @@
+- Fix a crash when opening History's Growth filter, and edits or deletes that could hit another measurement with the same server id (weight, length and head are numbered separately)

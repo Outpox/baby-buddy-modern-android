@@ -226,7 +226,7 @@ private fun entriesOf(
     if (filter == HistoryFilter.ALL || filter == HistoryFilter.GROWTH) {
         growth.forEach { g ->
             out += HistoryEntry(
-                key = "growth_${g.id}",
+                key = "growth_${g.kind.name}_${g.id}", // ids are per kind on the server
                 timeMillis = g.dateMillis,
                 time = "", // the server keeps only the date
                 title = g.kind.label,

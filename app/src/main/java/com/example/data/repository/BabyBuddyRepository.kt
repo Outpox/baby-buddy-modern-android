@@ -1753,16 +1753,18 @@ class BabyBuddyRepository {
         return event.id
     }
 
+    // Each kind has its own server endpoint and ids, so a weight and a length can share an id: match on both.
+
     /** Saves a changed measurement (value, day or note); the day is kept as local noon like the server's date. */
     fun updateGrowth(updated: GrowthEvent) {
         val event = updated.copy(dateMillis = parseLocalDateNoon(localDate(updated.dateMillis)) ?: updated.dateMillis)
-        _growth.update { list -> list.map { if (it.id == event.id) event else it }.sortedByDescending { it.dateMillis } }
+        _growth.update { list -> list.map { if (it.id == event.id && it.kind == event.kind) event else it }.sortedByDescending { it.dateMillis } }
         enqueue(QueuedWrite(event.kind.endpoint, QueuedWrite.ACTION_UPDATE, event.id, knownServerId(event.id, event.serverId), growthBody(event)))
     }
 
-    fun deleteGrowth(id: Long) {
-        val event = _growth.value.firstOrNull { it.id == id } ?: return
-        _growth.update { list -> list.filterNot { it.id == id } }
+    fun deleteGrowth(kind: GrowthKind, id: Long) {
+        val event = _growth.value.firstOrNull { it.id == id && it.kind == kind } ?: return
+        _growth.update { list -> list.filterNot { it.id == id && it.kind == kind } }
         enqueue(QueuedWrite(event.kind.endpoint, QueuedWrite.ACTION_DELETE, id, knownServerId(id, event.serverId)))
     }
 
@@ -2568,7 +2570,7 @@ class BabyBuddyRepository {
             ENDPOINT_TEMPERATURE -> _temperatures.value.firstOrNull { it.id == write.localId }?.serverId
             ENDPOINT_NOTES -> _notes.value.firstOrNull { it.id == write.localId }?.serverId
             ENDPOINT_SLEEP -> _sleeps.value.firstOrNull { it.id == write.localId }?.serverId
-            in GROWTH_ENDPOINTS -> _growth.value.firstOrNull { it.id == write.localId }?.serverId
+            in GROWTH_ENDPOINTS -> _growth.value.firstOrNull { it.id == write.localId && it.kind.endpoint == write.endpoint }?.serverId
             else -> _tummyTimes.value.firstOrNull { it.id == write.localId }?.serverId
         }
     }
@@ -2640,7 +2642,7 @@ class BabyBuddyRepository {
             ENDPOINT_TEMPERATURE -> _temperatures.update { l -> l.map { if (it.id == write.localId) it.copy(serverId = serverId) else it } }
             ENDPOINT_NOTES -> _notes.update { l -> l.map { if (it.id == write.localId) it.copy(serverId = serverId) else it } }
             ENDPOINT_SLEEP -> _sleeps.update { l -> l.map { if (it.id == write.localId) it.copy(serverId = serverId) else it } }
-            in GROWTH_ENDPOINTS -> _growth.update { l -> l.map { if (it.id == write.localId) it.copy(serverId = serverId) else it } }
+            in GROWTH_ENDPOINTS -> _growth.update { l -> l.map { if (it.id == write.localId && it.kind.endpoint == write.endpoint) it.copy(serverId = serverId) else it } }
             else -> _tummyTimes.update { l -> l.map { if (it.id == write.localId) it.copy(serverId = serverId) else it } }
         }
         synchronized(pendingWrites) {
