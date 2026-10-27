@@ -92,8 +92,9 @@ private fun diaperDetail(d: DiaperEvent): String {
     ).joinToString(" · ")
 }
 
-/** Rash and cream, then who logged it and the note. */
+/** Amount, rash and cream, then who logged it and the note. */
 private fun diaperSubtitle(d: DiaperEvent): String = listOfNotNull(
+    "Amount: ${d.amount}".takeIf { d.type != DiaperType.DRY && d.amount.isNotBlank() },
     "Rash".takeIf { d.rashPresent },
     d.skinBarrierApplied.takeIf { it.isNotEmpty() }?.joinToString(", ") { it.substringBefore(" / ") },
     whoAndNote(d.caregiver, d.notes).takeIf { it.isNotBlank() }

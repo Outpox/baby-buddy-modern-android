@@ -225,6 +225,8 @@ fun BabyBuddyApp(
     val historyIsCurrentWeek by viewModel.historyIsCurrentWeek.collectAsState()
     val historyFilter by viewModel.historyFilter.collectAsState()
     val lastBreastfeed by viewModel.lastBreastfeed.collectAsState()
+    val lastFeed by viewModel.lastFeed.collectAsState()
+    val previousFeedMillis by viewModel.previousFeedMillis.collectAsState()
     val lastDiaper by viewModel.lastDiaper.collectAsState()
     val quickActions by viewModel.quickActions.collectAsState()
 
@@ -331,6 +333,8 @@ fun BabyBuddyApp(
                         notes = notes,
                         feedIntervals = feedIntervals,
                         lastBreastfeed = lastBreastfeed,
+                        lastFeed = lastFeed,
+                        previousFeedMillis = previousFeedMillis,
                         lastDiaper = lastDiaper,
                         quickActions = quickActions,
                         onQuickActionsChange = { viewModel.setQuickActions(it) },
@@ -400,6 +404,7 @@ fun BabyBuddyApp(
                     NursingTimerScreen(
                         liveTimerState = liveTimerState,
                         lastBreastfeed = lastBreastfeed,
+                        previousFeedMillis = previousFeedMillis,
                         onSetSideSeconds = { side, sec -> viewModel.setSideSeconds(side, sec) },
                         onSetFeedStart = { viewModel.setFeedStart(it) },
                         recentFeedings = recentFeedings,
@@ -434,6 +439,7 @@ fun BabyBuddyApp(
                     QuickLogModal(
                         liveTimerState = liveTimerState,
                         lastBreastfeed = lastBreastfeed,
+                        previousFeedMillis = previousFeedMillis,
                         onSetSideSeconds = { side, sec -> viewModel.setSideSeconds(side, sec) },
                         onSetFeedStart = { viewModel.setFeedStart(it) },
                         onClose = { viewModel.navigateTo(ScreenDestination.TODAY_DASHBOARD) },
@@ -461,16 +467,17 @@ fun BabyBuddyApp(
                         },
                         lastPumpMl = recentPumpings.firstOrNull()?.amountMl ?: 120,
                         lastPumpMinutes = recentPumpings.firstOrNull()?.durationMinutes?.takeIf { it > 0 } ?: 20,
-                        onLogDiaper = { type, consistency, color, notes, time ->
+                        onLogDiaper = { type, amt, cons, col, rash, barriers, time, notes, startNursing ->
                             viewModel.saveDiaperChange(
                                 type = type,
-                                amount = "",
-                                consistency = consistency,
-                                color = color,
-                                rashPresent = false,
-                                skinBarriers = emptyList(),
+                                amount = amt,
+                                consistency = cons,
+                                color = col,
+                                rashPresent = rash,
+                                skinBarriers = barriers,
                                 timeMillis = time,
-                                notes = notes
+                                notes = notes,
+                                startNursingAfter = startNursing
                             )
                         },
                         liveFeedNotes = viewModel.liveFeedNotes(),

@@ -35,7 +35,9 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.BreastSide
 import com.example.data.model.FeedingEvent
 import com.example.data.model.LiveTimerState
+import com.example.data.model.TimeFormat
 import com.example.data.model.dayAndTime
+import com.example.data.model.formatMinutes
 import com.example.ui.theme.OnPrimary
 import com.example.ui.theme.OutlineColor
 import com.example.ui.theme.PrimaryColor
@@ -59,7 +61,8 @@ fun BreastSideControls(
     buttonHeight: Dp = 72.dp,
     lastFeed: FeedingEvent? = null, // most recent breastfeed, to show which side it ended on
     onSetSideSeconds: ((BreastSide, Int) -> Unit)? = null, // manual correction; shows Edit under each side
-    onSetStart: ((Long) -> Unit)? = null // shows the feed's start time, editable
+    onSetStart: ((Long) -> Unit)? = null, // shows the feed's start time, editable
+    previousFeedMillis: Long? = null // start of the feed before this one (breast or bottle)
 ) {
     val hasFeed = state.isRunning && state.feedingLocalId != null
     var editingSide by remember { mutableStateOf<BreastSide?>(null) }
@@ -102,6 +105,14 @@ fun BreastSideControls(
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (hasFeed && previousFeedMillis != null) {
+            val gapMinutes = ((state.sessionStartMillis - previousFeedMillis) / 60_000L).toInt()
+            Text(
+                "${formatMinutes(gapMinutes)} since the previous feed (${TimeFormat.clock(previousFeedMillis)})",
+                style = MaterialTheme.typography.labelSmall,
+                color = OutlineColor
             )
         }
 

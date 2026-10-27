@@ -42,6 +42,7 @@ fun NursingTimerScreen(
     onTapSide: (BreastSide) -> Unit,
     onEndFeed: () -> Unit,
     lastBreastfeed: FeedingEvent? = null,
+    previousFeedMillis: Long? = null,
     onSetSideSeconds: (BreastSide, Int) -> Unit = { _, _ -> },
     onSetFeedStart: (Long) -> Unit = {},
     modifier: Modifier = Modifier
@@ -81,7 +82,8 @@ fun NursingTimerScreen(
             buttonHeight = 96.dp,
             lastFeed = lastBreastfeed,
             onSetSideSeconds = onSetSideSeconds,
-            onSetStart = onSetFeedStart
+            onSetStart = onSetFeedStart,
+            previousFeedMillis = previousFeedMillis
         )
 
         if (earlier.isNotEmpty()) {

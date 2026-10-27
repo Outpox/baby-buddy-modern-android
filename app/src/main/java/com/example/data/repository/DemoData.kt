@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import com.example.data.model.BATH_TAG
 import com.example.data.model.BreastSide
+import com.example.data.model.DIAPER_AMOUNTS
 import com.example.data.model.DiaperEvent
 import com.example.data.model.DiaperType
 import com.example.data.model.FeedType
@@ -87,6 +88,7 @@ fun generateDemoHistory(now: Long, birthMillis: Long, days: Int = 90, clock: (Lo
         }
         diapers += DiaperEvent(
             id = id++, type = kind, timeMillis = t, timeFormatted = clock(t), caregiver = who(),
+            amount = DIAPER_AMOUNTS[((t / 60_000L) % DIAPER_AMOUNTS.size).toInt()], // varied without another random draw
             consistency = if (kind == DiaperType.WET) "" else "Soft", color = "", skinBarrierApplied = emptyList(), notes = "", imageUrl = null
         )
     }

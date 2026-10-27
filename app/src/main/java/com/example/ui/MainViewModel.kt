@@ -129,6 +129,8 @@ class MainViewModel(
     val tummyTimes: StateFlow<List<TummyTimeEvent>> = repository.tummyTimes
     val pumpings: StateFlow<List<PumpingEvent>> = repository.pumpings
     val lastBreastfeed: StateFlow<FeedingEvent?> = repository.lastBreastfeed
+    val lastFeed: StateFlow<FeedingEvent?> = repository.lastFeed
+    val previousFeedMillis: StateFlow<Long?> = repository.previousFeedMillis
     val lastDiaper: StateFlow<DiaperEvent?> = repository.lastDiaper
     val quickActions: StateFlow<List<QuickAction>> = repository.quickActions
     fun setQuickActions(actions: List<QuickAction>) = repository.setQuickActions(actions)
@@ -302,7 +304,8 @@ class MainViewModel(
                 model = fitted,
                 ageOriginMillis = model.ageOriginMillis ?: System.currentTimeMillis(),
                 trainedAt = (_modelsState.value as? ModelsState.Ready)?.trainedAt ?: System.currentTimeMillis(),
-                inputs = model.inputs
+                inputs = model.inputs,
+                residuals = score.residuals
             )
             repository.setUsedModel(model.target, saved)
             showToast("${model.target.title}: now estimated by ${score.family.lowercase()}")

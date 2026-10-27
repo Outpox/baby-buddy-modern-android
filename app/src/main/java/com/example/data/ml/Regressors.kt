@@ -40,6 +40,15 @@ sealed interface Regressor {
                     KnnModel(scaler, k, Array(n) { r.array(p) }, r.array(n))
                 }
 
+                5 -> {
+                    val sinCol = r.int()
+                    val cosCol = r.int()
+                    val width = r.int()
+                    val start = r.int()
+                    val all = r.array(r.int())
+                    TimeOfDayModel(sinCol, cosCol, width, start, List(r.int()) { r.array(r.int()) }, all)
+                }
+
                 else -> error("Unknown model")
             }
         }
@@ -162,6 +171,42 @@ internal class KnnModel(private val scaler: Scaler, private val k: Int, private 
     }
 }
 
+/**
+ * The median of recent intervals that started in the same part of the day: [widthHours]-hour windows from
+ * [startHour] (24 = any time of day). Reads the time of day from the sin/cos columns; a window with fewer than
+ * three intervals uses all recent ones.
+ */
+internal class TimeOfDayModel(
+    private val sinCol: Int,
+    private val cosCol: Int,
+    private val widthHours: Int,
+    private val startHour: Int,
+    private val buckets: List<DoubleArray>,
+    private val all: DoubleArray
+) : Regressor {
+    override fun predict(x: DoubleArray): Double {
+        val bucket = buckets[timeOfDayBucket(x[sinCol], x[cosCol], widthHours, startHour)]
+        return median(if (bucket.size >= 3) bucket else all)
+    }
+
+    override fun encode(): DoubleArray {
+        val out = mutableListOf(5.0, sinCol.toDouble(), cosCol.toDouble(), widthHours.toDouble(), startHour.toDouble(), all.size.toDouble())
+        out += all.toList()
+        out += buckets.size.toDouble()
+        buckets.forEach {
+            out += it.size.toDouble()
+            out += it.toList()
+        }
+        return out.toDoubleArray()
+    }
+}
+
+/** Which [widthHours]-hour window (counted from [startHour]) the time of day encoded as sin/cos falls in. */
+internal fun timeOfDayBucket(sin: Double, cos: Double, widthHours: Int, startHour: Int): Int {
+    val minute = (kotlin.math.atan2(sin, cos) / (2 * Math.PI) * 1440 + 1440) % 1440
+    return (((minute - startHour * 60 + 1440) % 1440) / (widthHours * 60)).toInt().coerceIn(0, 24 / widthHours - 1)
+}
+
 /** Fits a [Regressor] to rows [x] and targets [y]. Deterministic (seeded), so AutoML picks are repeatable. */
 fun interface Trainer {
     fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor
@@ -207,6 +252,28 @@ class FixedValue(private val value: Double) : Trainer {
 /** Always the training average: the app's default estimate (average interval) when no fixed one is set. */
 object MeanBaseline : Trainer {
     override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor = ConstantModel(y.average())
+}
+
+/**
+ * [TimeOfDayModel] over the intervals from the last [days] days (by the age column [ageCol]): babies change
+ * week to week, so recent intervals in the same part of the day often predict as well as anything.
+ */
+class TimeOfDayMedian(
+    private val widthHours: Int,
+    private val startHour: Int,
+    private val days: Int,
+    private val sinCol: Int,
+    private val cosCol: Int,
+    private val ageCol: Int
+) : Trainer {
+    override fun fit(x: Array<DoubleArray>, y: DoubleArray): Regressor {
+        val newest = x.maxOf { it[ageCol] }
+        val recent = x.indices.filter { x[it][ageCol] >= newest - days }
+        val buckets = List(24 / widthHours) { b ->
+            recent.filter { timeOfDayBucket(x[it][sinCol], x[it][cosCol], widthHours, startHour) == b }.map { y[it] }.toDoubleArray()
+        }
+        return TimeOfDayModel(sinCol, cosCol, widthHours, startHour, buckets, recent.map { y[it] }.toDoubleArray())
+    }
 }
 
 /** Linear regression with an L2 penalty [lambda] on standardized inputs (closed form). */

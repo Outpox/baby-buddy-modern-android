@@ -15,8 +15,10 @@ import kotlin.math.sin
 enum class RhythmTarget(val title: String, val description: String) {
     FEED_GAP("Next feed", "Minutes from one feed's start to the next"),
     DIAPER_GAP("Next diaper", "Minutes from one change to the next"),
-    SLEEP_LENGTH("Wake-up", "How long a sleep lasts"),
-    AWAKE_WINDOW("Next sleep", "Minutes awake between sleeps")
+
+    // Falling asleep before waking up, the order they're listed in (Trends → Models)
+    AWAKE_WINDOW("Next sleep", "Minutes awake between sleeps"),
+    SLEEP_LENGTH("Wake-up", "How long a sleep lasts")
 }
 
 /** A target's rows, plus the row for "now" (the latest feed / change / sleep) and when that row starts counting. */
@@ -148,7 +150,7 @@ object RhythmFeatures {
             sleeps.indices.lastOrNull()?.takeIf { events.runningSleepStart == null }?.let(::wakeRow),
             sleeps.lastOrNull()?.endMillis?.takeIf { events.runningSleepStart == null }
         )
-        return listOf(feedSet, changeSet, lengthSet, awakeSet)
+        return listOf(feedSet, changeSet, awakeSet, lengthSet)
     }
 }
 
@@ -205,22 +207,46 @@ class SavedRhythmModel(
     val model: Regressor,
     val ageOriginMillis: Long,
     val trainedAt: Long,
-    val inputs: Int // how many input columns it was trained on
+    val inputs: Int, // how many input columns it was trained on
+    residuals: List<Double> = emptyList() // its validation errors in minutes (actual − predicted), for overdue estimates
 ) {
-    fun toText(): String = listOf(target.name, family, settings, mae, ageOriginMillis, trainedAt, inputs, model.toText()).joinToString(SEP)
+    /** At most 49 evenly spread [residuals], so the saved text stays small. */
+    val residuals: List<Double> = residuals.sorted().let { r ->
+        if (r.size <= 49) r else List(49) { r[(it * (r.size - 1)) / 48] }
+    }
+
+    fun toText(): String = listOf(target.name, family, settings, mae, ageOriginMillis, trainedAt, inputs, model.toText(), residuals.joinToString(","))
+        .joinToString(SEP)
 
     companion object {
         private const val SEP = "\u001F"
 
         fun fromText(text: String): SavedRhythmModel? = runCatching {
             val f = text.split(SEP)
-            SavedRhythmModel(RhythmTarget.valueOf(f[0]), f[1], f[2], f[3].toDouble(), Regressor.fromText(f[7]), f[4].toLong(), f[5].toLong(), f[6].toInt())
+            SavedRhythmModel(
+                RhythmTarget.valueOf(f[0]), f[1], f[2], f[3].toDouble(), Regressor.fromText(f[7]), f[4].toLong(), f[5].toLong(), f[6].toInt(),
+                // Saved before overdue estimates: none
+                f.getOrNull(8)?.takeIf { it.isNotEmpty() }?.split(',')?.map(String::toDouble).orEmpty()
+            )
         }.getOrNull()
     }
 }
 
-/** When a saved model expects the next event: [anchorMillis] (the feed, change, sleep start or wake-up it counts from) + its prediction. */
-data class RhythmPrediction(val anchorMillis: Long, val dueMillis: Long)
+/**
+ * When a saved model expects the next event: [anchorMillis] (the feed, change, sleep start or wake-up it counts
+ * from) + its prediction. [residuals] are the model's validation errors in minutes.
+ */
+data class RhythmPrediction(val anchorMillis: Long, val dueMillis: Long, val residuals: List<Double> = emptyList()) {
+    /**
+     * When the event now looks most likely: [dueMillis] until it passes; after that, the middle of the model's past
+     * outcomes that ran longer than this one has so far (else now). Reminders keep [dueMillis].
+     */
+    fun expectedMillis(now: Long): Long {
+        if (now <= dueMillis || residuals.isEmpty()) return dueMillis
+        val later = residuals.map { dueMillis + (it * 60_000).toLong() }.filter { it > now }
+        return if (later.isEmpty()) now else median(later.map(Long::toDouble).toDoubleArray()).toLong()
+    }
+}
 
 /** Predicts with each saved model from recent events (a day or two is enough for its inputs). */
 fun predictRhythms(events: RhythmEvents, models: Collection<SavedRhythmModel>): Map<RhythmTarget, RhythmPrediction> = models.mapNotNull { saved ->
@@ -232,5 +258,5 @@ fun predictRhythms(events: RhythmEvents, models: Collection<SavedRhythmModel>): 
     if (row.size != saved.inputs) return@mapNotNull null
     val minutes = runCatching { saved.model.predict(row) }.getOrNull()?.takeIf { it.isFinite() }?.coerceIn(1.0, 24 * 60.0)
         ?: return@mapNotNull null
-    saved.target to RhythmPrediction(anchor, anchor + (minutes * 60_000).toLong())
+    saved.target to RhythmPrediction(anchor, anchor + (minutes * 60_000).toLong(), saved.residuals)
 }.toMap()

@@ -1,0 +1,5 @@
+- Log screen diaper entry is now the same as the Diaper shortcut: amount, rash, cream, color swatches and "Save & start feed"
+- Diaper amount (light to heavy) is saved and shown in History; edit it from the entry
+- Bottles count as the last feed on Today, even from last night
+- While feeding, a small line shows how long it has been since the previous feed
+- Rhythm models: new time-of-day medians from recent days; an overdue next feed, diaper or sleep is re-estimated instead of showing a time in the past; Trends lists Next sleep before Wake-up

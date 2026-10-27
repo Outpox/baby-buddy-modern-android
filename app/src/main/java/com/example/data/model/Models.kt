@@ -105,6 +105,9 @@ enum class DiaperType {
     DRY
 }
 
+/** Diaper amounts, lightest first (kept in the server notes as "Amount: …"). */
+val DIAPER_AMOUNTS = listOf("Light", "Medium", "Heavy")
+
 data class DiaperEvent(
     val id: Long = System.currentTimeMillis(),
     val serverId: Long? = null, // Baby Buddy record id, once saved on the server

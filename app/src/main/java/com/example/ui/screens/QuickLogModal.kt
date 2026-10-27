@@ -50,7 +50,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.model.BreastSide
-import com.example.data.model.DiaperType
 import com.example.data.model.FeedingEvent
 import com.example.data.model.GrowthEvent
 import com.example.data.model.GrowthKind
@@ -62,7 +61,6 @@ import com.example.data.model.formatGrowth
 import com.example.ui.components.BathForm
 import com.example.ui.components.BottleForm
 import com.example.ui.components.BreastSideControls
-import com.example.ui.components.DiaperQuickForm
 import com.example.ui.components.GrowthForm
 import com.example.ui.components.PumpingForm
 import com.example.ui.components.latestGrowth
@@ -100,9 +98,10 @@ fun QuickLogModal(
     lastPumpMl: Int = 120,
     lastPumpMinutes: Int = 20,
     lastBreastfeed: FeedingEvent? = null,
+    previousFeedMillis: Long? = null,
     onSetSideSeconds: (BreastSide, Int) -> Unit = { _, _ -> },
     onSetFeedStart: (Long) -> Unit = {},
-    onLogDiaper: (type: DiaperType, consistency: String, color: String, notes: String, timeMillis: Long?) -> Unit = { _, _, _, _, _ -> },
+    onLogDiaper: DiaperSave = { _, _, _, _, _, _, _, _, _ -> },
     liveFeedNotes: String = "",
     onLiveFeedNotesChange: (String) -> Unit = {},
     hiddenItems: Set<TrackedItem> = emptySet(),
@@ -186,6 +185,7 @@ fun QuickLogModal(
                         liveFeedNotes = liveFeedNotes,
                         onLiveFeedNotesChange = onLiveFeedNotesChange,
                         lastBreastfeed = lastBreastfeed,
+                        previousFeedMillis = previousFeedMillis,
                         onSetSideSeconds = onSetSideSeconds,
                         onSetFeedStart = onSetFeedStart
                     )
@@ -218,11 +218,10 @@ fun QuickLogModal(
                     expanded = expanded,
                     onToggle = { toggle(entry) }
                 ) {
-                    DiaperQuickForm(
-                        onCancel = { open = null },
-                        onSave = { type, consistency, color, notes, time ->
+                    DiaperForm(
+                        onSave = { type, amount, consistency, color, rash, creams, time, notes, startNursing ->
                             open = null
-                            onLogDiaper(type, consistency, color, notes, time)
+                            onLogDiaper(type, amount, consistency, color, rash, creams, time, notes, startNursing)
                         }
                     )
                 }
@@ -378,6 +377,7 @@ private fun FeedPanel(
     liveFeedNotes: String,
     onLiveFeedNotesChange: (String) -> Unit,
     lastBreastfeed: FeedingEvent? = null,
+    previousFeedMillis: Long? = null,
     onSetSideSeconds: (BreastSide, Int) -> Unit = { _, _ -> },
     onSetFeedStart: (Long) -> Unit = {}
 ) {
@@ -388,7 +388,8 @@ private fun FeedPanel(
             onEndFeed = onEndFeed,
             lastFeed = lastBreastfeed,
             onSetSideSeconds = onSetSideSeconds,
-            onSetStart = onSetFeedStart
+            onSetStart = onSetFeedStart,
+            previousFeedMillis = previousFeedMillis
         )
         val feedId = liveTimerState.feedingLocalId
         if (liveTimerState.isRunning && feedId != null) {

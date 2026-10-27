@@ -77,6 +77,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -158,14 +159,35 @@ class BabyBuddyRepository {
 
     /** Today's sleeps (including one that started last night and ended today). */
     // Newest feed of any kind and newest sleep end on the server (may be yesterday's), for reminders and "awake for"
-    private val _lastFeedRemote = MutableStateFlow<Long?>(null)
+    private val _recentFeedsRemote = MutableStateFlow<List<FeedingEvent>>(emptyList()) // newest first
     private val _lastSleepEndRemote = MutableStateFlow<Long?>(null)
 
-    /** When the most recent feed started (today's, else the server's latest). */
-    val lastFeedMillis: StateFlow<Long?> by lazy {
-        combine(_feedings, _lastFeedRemote) { today, remote ->
-            listOfNotNull(today.maxOfOrNull { it.timeMillis }, remote).maxOrNull()
+    /** The most recent feed of any kind, breast or bottle (today's if any, else the latest on the server). */
+    val lastFeed: StateFlow<FeedingEvent?> by lazy {
+        combine(_feedings, _recentFeedsRemote) { today, recent ->
+            val remote = recent.firstOrNull()
+            today.maxByOrNull { it.timeMillis }?.takeIf { remote == null || it.timeMillis >= remote.timeMillis } ?: remote
         }.stateIn(syncScope, SharingStarted.Eagerly, null)
+    }
+
+    /**
+     * While a feed is timed, when the feed before it (breast or bottle) started, from today's entries and the
+     * server's latest; null without a running feed or an earlier one.
+     */
+    val previousFeedMillis: StateFlow<Long?> by lazy {
+        combine(
+            _feedings,
+            _recentFeedsRemote,
+            _liveTimerState.map { it.takeIf { s -> s.isRunning }?.let { s -> s.sessionStartMillis to s.feedingLocalId } }.distinctUntilChanged()
+        ) { today, recent, feed ->
+            val (start, currentId) = feed ?: return@combine null
+            (today + recent).filter { it.id != currentId && it.timeMillis < start - 60_000L }.maxOfOrNull { it.timeMillis }
+        }.stateIn(syncScope, SharingStarted.Eagerly, null)
+    }
+
+    /** When the most recent feed (breast or bottle) started. */
+    val lastFeedMillis: StateFlow<Long?> by lazy {
+        lastFeed.map { it?.timeMillis }.stateIn(syncScope, SharingStarted.Eagerly, null)
     }
 
     /** When the baby last woke up (end of the latest sleep), or null if unknown. */
@@ -292,6 +314,7 @@ class BabyBuddyRepository {
         _notes.update { list -> list.map { it.copy(timeFormatted = formatClock(it.timeMillis)) } }
         _sleeps.update { list -> list.map { it.copy(timeFormatted = formatClock(it.timeMillis)) } }
         _lastBreastfeedRemote.update { it?.copy(timeFormatted = formatClock(it.timeMillis)) }
+        _recentFeedsRemote.update { list -> list.map { it.copy(timeFormatted = formatClock(it.timeMillis)) } }
         _lastDiaperRemote.update { it?.copy(timeFormatted = formatClock(it.timeMillis)) }
         _liveTimerState.update { t ->
             if (t.isRunning && t.sessionStartMillis > 0) t.copy(sessionStartedTime = formatClock(t.sessionStartMillis)) else t
@@ -473,7 +496,7 @@ class BabyBuddyRepository {
                 val result = m.result ?: return@forEach
                 setUsedModel(
                     m.target,
-                    SavedRhythmModel(m.target, result.best.family, result.best.settings, result.best.mae, result.model, m.ageOriginMillis ?: from, now, m.inputs)
+                    SavedRhythmModel(m.target, result.best.family, result.best.settings, result.best.mae, result.model, m.ageOriginMillis ?: from, now, m.inputs, result.best.residuals)
                 )
             }
         }
@@ -515,7 +538,7 @@ class BabyBuddyRepository {
 
         // The latest of each, from before today too (early in the morning today has little)
         _lastBreastfeedRemote.value = allDemoFeedings.firstOrNull { it.type == FeedType.NURSING }
-        _lastFeedRemote.value = allDemoFeedings.firstOrNull()?.timeMillis
+        _recentFeedsRemote.value = allDemoFeedings.sortedByDescending { it.timeMillis }.take(10)
         _lastDiaperRemote.value = allDemoDiapers.firstOrNull()
         _lastSleepEndRemote.value = allDemoSleeps.maxOfOrNull { it.endMillis }
         _lastBathRemote.value = allDemoNotes.firstOrNull { BATH_TAG in it.tags }?.timeMillis
@@ -642,7 +665,7 @@ class BabyBuddyRepository {
             api.getFeedings(authHeader, childId, limit = 10).body()!!.results.map(::mapFeeding)
         }.onSuccess { recent ->
             _lastBreastfeedRemote.value = recent.firstOrNull { it.type == FeedType.NURSING }
-            _lastFeedRemote.value = recent.maxOfOrNull { it.timeMillis }
+            _recentFeedsRemote.value = recent.sortedByDescending { it.timeMillis }
         }
 
         runCatching {
@@ -789,12 +812,16 @@ class BabyBuddyRepository {
         return listOfNotNull(line, e.notes.ifBlank { null }).joinToString("\n")
     }
 
-    private class DiaperExtras(val rash: Boolean, val creams: List<String>, val consistency: String, val notes: String)
+    private class DiaperExtras(val rash: Boolean, val creams: List<String>, val consistency: String, val amount: String, val notes: String)
 
-    /** Rash/cream/consistency have no server field; they live in one "Rash | Cream: … | Consistency: …" notes line. */
+    /**
+     * Amount (Light/Medium/Heavy), rash, cream and consistency have no server field; they live in one
+     * "Amount: … | Rash | Cream: … | Consistency: …" notes line.
+     */
     private fun composeDiaperNotes(e: DiaperEvent): String {
         val solid = e.type == DiaperType.DIRTY || e.type == DiaperType.BOTH
         val extras = buildList {
+            if (e.type != DiaperType.DRY && e.amount.isNotBlank()) add("Amount: ${e.amount}")
             if (e.rashPresent) add("Rash")
             if (e.skinBarrierApplied.isNotEmpty()) add("Cream: ${e.skinBarrierApplied.joinToString(", ")}")
             if (solid && e.consistency.isNotBlank()) add("Consistency: ${e.consistency}")
@@ -803,16 +830,17 @@ class BabyBuddyRepository {
     }
 
     private fun parseDiaperNotes(notes: String): DiaperExtras {
-        val segment = Regex("""^(Rash|Cream: .+|Consistency: .+)$""")
+        val segment = Regex("""^(Amount: .+|Rash|Cream: .+|Consistency: .+)$""")
         val lines = notes.lines()
         val extrasLine = lines.lastOrNull { line ->
             line.isNotBlank() && line.split(" | ").all { segment.matches(it.trim()) }
-        } ?: return DiaperExtras(false, emptyList(), "", notes)
+        } ?: return DiaperExtras(false, emptyList(), "", "", notes)
         val segments = extrasLine.split(" | ").map { it.trim() }
         return DiaperExtras(
             rash = "Rash" in segments,
             creams = segments.firstOrNull { it.startsWith("Cream: ") }?.removePrefix("Cream: ")?.split(", ").orEmpty(),
             consistency = segments.firstOrNull { it.startsWith("Consistency: ") }?.removePrefix("Consistency: ").orEmpty(),
+            amount = segments.firstOrNull { it.startsWith("Amount: ") }?.removePrefix("Amount: ").orEmpty(),
             notes = (lines - extrasLine).joinToString("\n").trim()
         )
     }
@@ -850,7 +878,7 @@ class BabyBuddyRepository {
                 dto.wet -> DiaperType.WET
                 else -> DiaperType.DRY
             },
-            amount = dto.amount?.toString() ?: "",
+            amount = extras.amount,
             consistency = extras.consistency,
             color = appDiaperColor(dto.color),
             rashPresent = extras.rash,
@@ -1213,23 +1241,33 @@ class BabyBuddyRepository {
     /** The model's expected time for the next event counted from [anchorMillis], if a model is used for [target]. */
     fun modelDue(target: RhythmTarget, anchorMillis: Long): Long? = _rhythmPredictions.value[target]?.takeIf { kotlin.math.abs(it.anchorMillis - anchorMillis) < 60_000L }?.dueMillis
 
+    /** Like [modelDue], but once that time has passed, when the event now looks most likely (see [RhythmPrediction.expectedMillis]). */
+    private fun modelExpected(target: RhythmTarget, anchorMillis: Long, now: Long): Long? = _rhythmPredictions.value[target]?.takeIf { kotlin.math.abs(it.anchorMillis - anchorMillis) < 60_000L }?.expectedMillis(now)
+
     /**
      * The picked models' times for what's next from here: the next feed (unless one is running), the next diaper
-     * change, and the wake-up while a sleep is timed, else the next sleep. Untracked items are left out.
+     * change, and the wake-up while a sleep is timed, else the next sleep. Untracked items are left out. An overdue
+     * time is re-estimated every minute.
      */
     val modelNextTimes: StateFlow<Map<RhythmTarget, Long>> by lazy {
-        combine(_rhythmPredictions, _hiddenItems, _liveTimerState.map { it.isRunning }) { _, hidden, feeding ->
+        val minutes = flow {
+            while (true) {
+                emit(System.currentTimeMillis())
+                delay(60_000L)
+            }
+        }
+        combine(_rhythmPredictions, _hiddenItems, _liveTimerState.map { it.isRunning }, minutes) { _, hidden, feeding, now ->
             val sleep = _sleepTimer.value
             buildMap {
                 val feedsShown = TrackedItem.BREASTFEEDING !in hidden || TrackedItem.BOTTLE !in hidden
-                lastFeedMillis.value?.takeIf { feedsShown && !feeding }?.let { modelDue(RhythmTarget.FEED_GAP, it) }?.let { put(RhythmTarget.FEED_GAP, it) }
-                lastDiaper.value?.takeIf { TrackedItem.DIAPERS !in hidden }?.let { modelDue(RhythmTarget.DIAPER_GAP, it.timeMillis) }
+                lastFeedMillis.value?.takeIf { feedsShown && !feeding }?.let { modelExpected(RhythmTarget.FEED_GAP, it, now) }?.let { put(RhythmTarget.FEED_GAP, it) }
+                lastDiaper.value?.takeIf { TrackedItem.DIAPERS !in hidden }?.let { modelExpected(RhythmTarget.DIAPER_GAP, it.timeMillis, now) }
                     ?.let { put(RhythmTarget.DIAPER_GAP, it) }
                 if (TrackedItem.SLEEP !in hidden) {
                     if (sleep.isRunning) {
-                        modelDue(RhythmTarget.SLEEP_LENGTH, sleep.startMillis)?.let { put(RhythmTarget.SLEEP_LENGTH, it) }
+                        modelExpected(RhythmTarget.SLEEP_LENGTH, sleep.startMillis, now)?.let { put(RhythmTarget.SLEEP_LENGTH, it) }
                     } else {
-                        lastSleepEndMillis.value?.let { modelDue(RhythmTarget.AWAKE_WINDOW, it) }?.let { put(RhythmTarget.AWAKE_WINDOW, it) }
+                        lastSleepEndMillis.value?.let { modelExpected(RhythmTarget.AWAKE_WINDOW, it, now) }?.let { put(RhythmTarget.AWAKE_WINDOW, it) }
                     }
                 }
             }
@@ -1413,7 +1451,7 @@ class BabyBuddyRepository {
         _tummyTimes.value = emptyList()
         _pumpings.value = emptyList()
         _lastBreastfeedRemote.value = null
-        _lastFeedRemote.value = null
+        _recentFeedsRemote.value = emptyList()
         _lastDiaperRemote.value = null
         _lastSleepEndRemote.value = null
         _lastBathRemote.value = null
@@ -1680,12 +1718,14 @@ class BabyBuddyRepository {
         _feedings.update { list -> list.map { if (it.id == event.id) event else it }.sortedByDescending { it.timeMillis } }
         // An older feed edited from History may be the "last breastfeed" (its last side drives Today and the widget)
         _lastBreastfeedRemote.update { if (it?.id == event.id) event else it }
+        _recentFeedsRemote.update { list -> list.map { if (it.id == event.id) event else it }.sortedByDescending { it.timeMillis } }
         enqueue(QueuedWrite(ENDPOINT_FEEDINGS, QueuedWrite.ACTION_UPDATE, event.id, knownServerId(event.id, event.serverId), feedingBody(event)))
     }
 
     fun deleteFeeding(id: Long) {
         val event = _feedings.value.firstOrNull { it.id == id } ?: return
         _feedings.update { list -> list.filterNot { it.id == id } }
+        _recentFeedsRemote.update { list -> list.filterNot { it.id == id } }
         enqueue(QueuedWrite(ENDPOINT_FEEDINGS, QueuedWrite.ACTION_DELETE, id, knownServerId(id, event.serverId)))
     }
 

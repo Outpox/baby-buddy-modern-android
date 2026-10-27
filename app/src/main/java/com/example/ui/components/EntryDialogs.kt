@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.BATH_NOTE_TEXT
 import com.example.data.model.BreastSide
+import com.example.data.model.DIAPER_AMOUNTS
 import com.example.data.model.DiaperEvent
 import com.example.data.model.DiaperType
 import com.example.data.model.FeedType
@@ -217,55 +218,6 @@ fun PumpingForm(initialMl: Int, initialMinutes: Int, onCancel: () -> Unit, onSav
         NotesField(value = notes, onChange = { notes = it }, placeholderText = "Note (optional)")
         Spacer(Modifier.height(24.dp))
         CancelSaveRow(onCancel = onCancel, onSave = { onSave(ml, minutes, notes.trim(), pickedStart ?: (System.currentTimeMillis() - minutes * 60_000L)) })
-    }
-}
-
-/** Quick diaper entry: time (default now), wet / dirty / both / dry, stool consistency and color, note. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun DiaperQuickForm(
-    onCancel: () -> Unit,
-    onSave: (type: DiaperType, consistency: String, color: String, notes: String, timeMillis: Long?) -> Unit
-) {
-    var type by remember { mutableStateOf(DiaperType.WET) }
-    var consistency by remember { mutableStateOf("") } // optional; "" = not recorded
-    var color by remember { mutableStateOf("") }
-    var notes by remember { mutableStateOf("") }
-    var pickedTime by remember { mutableStateOf<Long?>(null) } // null = now
-    val showStool = type == DiaperType.DIRTY || type == DiaperType.BOTH
-    Column {
-        NowTimeField(label = "Changed", picked = pickedTime, onChange = { pickedTime = it })
-        Spacer(Modifier.height(16.dp))
-        SegmentedToggle(
-            options = listOf("Wet", "Dirty", "Both", "Dry"),
-            selectedIndex = DiaperType.entries.indexOf(type).coerceAtLeast(0),
-            onSelect = { type = DiaperType.entries[it] }
-        )
-        if (showStool) {
-            Spacer(Modifier.height(16.dp))
-            SectionLabel("Consistency (optional)")
-            ChipGroup(
-                options = CONSISTENCY_OPTIONS,
-                isSelected = { it == consistency },
-                onToggle = { value -> consistency = if (consistency == value) "" else value }
-            )
-            Spacer(Modifier.height(12.dp))
-            SectionLabel("Color (optional)")
-            ChipGroup(
-                options = COLOR_OPTIONS.map { it to it },
-                isSelected = { it == color },
-                onToggle = { value -> color = if (color == value) "" else value }
-            )
-        }
-        Spacer(Modifier.height(20.dp))
-        NotesField(value = notes, onChange = { notes = it }, placeholderText = "Note (optional)")
-        Spacer(Modifier.height(24.dp))
-        CancelSaveRow(
-            onCancel = onCancel,
-            onSave = {
-                onSave(type, if (showStool) consistency else "", if (showStool) color else "", notes.trim(), pickedTime)
-            }
-        )
     }
 }
 
@@ -1148,6 +1100,7 @@ fun EditDiaperDialog(diaper: DiaperEvent, onDismiss: () -> Unit, onSave: (Diaper
     var barriers by remember { mutableStateOf(diaper.skinBarrierApplied) }
     var consistency by remember { mutableStateOf(diaper.consistency) }
     var color by remember { mutableStateOf(diaper.color) }
+    var amount by remember { mutableStateOf(diaper.amount) } // optional; "" = not recorded
     val showStool = type == DiaperType.DIRTY || type == DiaperType.BOTH
     // Keep an unknown stored color visible (and selectable) so it isn't lost.
     val colorOptions = remember(diaper.id) {
@@ -1167,6 +1120,16 @@ fun EditDiaperDialog(diaper: DiaperEvent, onDismiss: () -> Unit, onSave: (Diaper
             selectedIndex = DiaperType.entries.indexOf(type).coerceAtLeast(0),
             onSelect = { type = DiaperType.entries[it] }
         )
+
+        if (type != DiaperType.DRY) {
+            Spacer(Modifier.height(16.dp))
+            SectionLabel("Amount")
+            ChipGroup(
+                options = DIAPER_AMOUNTS.map { it to it },
+                isSelected = { it == amount },
+                onToggle = { value -> amount = if (amount == value) "" else value }
+            )
+        }
 
         if (showStool) {
             Spacer(Modifier.height(16.dp))
@@ -1210,6 +1173,7 @@ fun EditDiaperDialog(diaper: DiaperEvent, onDismiss: () -> Unit, onSave: (Diaper
                         timeFormatted = formatTime(millis),
                         consistency = consistency,
                         color = color,
+                        amount = amount,
                         rashPresent = rash,
                         skinBarrierApplied = barriers,
                         notes = notes.trim()

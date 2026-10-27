@@ -14,8 +14,11 @@ class Dataset(val x: Array<DoubleArray>, val y: DoubleArray, val features: List<
  */
 data class Candidate(val family: String, val settings: String, val trainer: Trainer, val reference: Boolean = false)
 
-/** How a candidate did on the held-out folds: mean absolute error, in the target's unit (minutes). */
-data class Score(val family: String, val settings: String, val mae: Double, val reference: Boolean = false)
+/**
+ * How a candidate did on the held-out folds: mean absolute error, in the target's unit (minutes), and each
+ * error (actual − predicted), which tells how long an overdue event may still take.
+ */
+data class Score(val family: String, val settings: String, val mae: Double, val reference: Boolean = false, val residuals: List<Double> = emptyList())
 
 data class AutoMlResult(
     val best: Score,
@@ -37,8 +40,8 @@ data class AutoMlResult(
 object AutoMl {
     const val MIN_ROWS = 20
 
-    /** Every model family and the settings tried for it. */
-    fun candidates(): List<Candidate> = buildList {
+    /** Every model family and the settings tried for it; [features] (the input columns) enable the time-of-day medians. */
+    fun candidates(features: List<String> = emptyList()): List<Candidate> = buildList {
         add(Candidate("Typical (median)", "baseline", MedianBaseline))
         listOf(0.1, 1.0, 10.0, 100.0).forEach { add(Candidate("Linear regression", "ridge λ=$it", RidgeRegression(it))) }
         for (depth in listOf(2, 3)) {
@@ -48,6 +51,17 @@ object AutoMl {
             for (decay in listOf(1e-3, 1e-2)) add(Candidate("Neural net", "$hidden hidden, decay $decay", NeuralNet(hidden, decay)))
         }
         listOf(5, 15).forEach { add(Candidate("Nearest neighbours", "k=$it", NearestNeighbours(it))) }
+        val sin = features.indexOf("Time of day (sin)")
+        val cos = features.indexOf("Time of day (cos)")
+        val age = features.indexOf("Age (days)")
+        if (sin >= 0 && cos >= 0 && age >= 0) {
+            listOf(3, 7).forEach { add(Candidate("Recent median", "last $it days", TimeOfDayMedian(24, 0, it, sin, cos, age))) }
+            for ((width, start) in listOf(4 to 2, 6 to 0, 12 to 6)) {
+                for (days in listOf(7, 14)) {
+                    add(Candidate("Time of day", "${width}h windows from %02d:00, last $days days".format(start), TimeOfDayMedian(width, start, days, sin, cos, age)))
+                }
+            }
+        }
     }
 
     /**
@@ -55,7 +69,7 @@ object AutoMl {
      * the rows before them (as a model would be used: on what came before). Every candidate is scored by its
      * mean absolute error over those blocks; the best one is refitted on all rows.
      */
-    fun fit(data: Dataset, folds: Int = 3, candidates: List<Candidate> = candidates(), default: Candidate? = null, onProgress: (Float) -> Unit = {}): AutoMlResult {
+    fun fit(data: Dataset, folds: Int = 3, candidates: List<Candidate> = candidates(data.features), default: Candidate? = null, onProgress: (Float) -> Unit = {}): AutoMlResult {
         val all = candidates + listOfNotNull(default?.copy(reference = true))
         require(data.size >= MIN_ROWS) { "Need at least $MIN_ROWS rows" }
         val n = data.size
@@ -64,17 +78,13 @@ object AutoMl {
         val splits = (k downTo 1).map { i -> (n - i * block) to (n - (i - 1) * block) } // (train end = test start, test end)
         var done = 0
         val scored = all.map { c ->
-            var errorSum = 0.0
-            var count = 0
+            val residuals = ArrayList<Double>()
             for ((testStart, testEnd) in splits) {
                 val model = c.trainer.fit(data.x.copyOfRange(0, testStart), data.y.copyOfRange(0, testStart))
-                for (i in testStart until testEnd) {
-                    errorSum += abs(model.predict(data.x[i]) - data.y[i])
-                    count++
-                }
+                for (i in testStart until testEnd) residuals += data.y[i] - model.predict(data.x[i])
             }
             onProgress(++done / (all.size + 2f))
-            c to Score(c.family, c.settings, errorSum / count, c.reference)
+            c to Score(c.family, c.settings, residuals.sumOf { abs(it) } / residuals.size, c.reference, residuals)
         }
         val (bestCandidate, best) = scored.filter { !it.first.reference }.minBy { it.second.mae }
         val baseline = scored.first { it.first.trainer === MedianBaseline }.second

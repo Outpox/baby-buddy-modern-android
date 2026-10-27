@@ -139,6 +139,8 @@ fun TodayDashboardScreen(
     notes: List<NoteEvent> = emptyList(),
     feedIntervals: FeedIntervalStats? = null,
     lastBreastfeed: FeedingEvent? = null,
+    lastFeed: FeedingEvent? = null, // breast or bottle
+    previousFeedMillis: Long? = null, // while a feed runs, when the one before it started
     lastDiaper: DiaperEvent? = null,
     quickActions: List<QuickAction> = QuickAction.DEFAULT,
     onQuickActionsChange: (List<QuickAction>) -> Unit = {},
@@ -332,7 +334,8 @@ fun TodayDashboardScreen(
                         liveTimerState = liveTimerState,
                         onTapSide = onTapSide,
                         onEndFeed = onEndFeed,
-                        onOpenFullTimer = { onNavigate(ScreenDestination.ACTIVE_NURSING_TIMER) }
+                        onOpenFullTimer = { onNavigate(ScreenDestination.ACTIVE_NURSING_TIMER) },
+                        previousFeedMillis = previousFeedMillis
                     )
                 }
             }
@@ -362,6 +365,9 @@ fun TodayDashboardScreen(
                         if (showLastFeed) {
                             LastFeedCard(
                                 recentFeedings = visibleFeedings,
+                                latestFeed = lastFeed?.takeIf {
+                                    (if (it.type == FeedType.NURSING) TrackedItem.BREASTFEEDING else TrackedItem.BOTTLE) !in hiddenItems
+                                },
                                 lastBreastfeed = lastBreastfeed.takeIf { TrackedItem.BREASTFEEDING !in hiddenItems },
                                 onClick = { onOpenHistory(HistoryFilter.FEEDS) },
                                 onRemove = { onRemoveDashboardWidget(DashboardWidgetType.LAST_FEED) },
@@ -506,7 +512,8 @@ fun LiveFeedingBanner(
     liveTimerState: LiveTimerState,
     onTapSide: (BreastSide) -> Unit,
     onEndFeed: () -> Unit,
-    onOpenFullTimer: () -> Unit
+    onOpenFullTimer: () -> Unit,
+    previousFeedMillis: Long? = null
 ) {
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -521,7 +528,8 @@ fun LiveFeedingBanner(
             onTapSide = onTapSide,
             onEndFeed = onEndFeed,
             buttonHeight = 64.dp,
-            modifier = Modifier.padding(20.dp)
+            modifier = Modifier.padding(20.dp),
+            previousFeedMillis = previousFeedMillis
         )
     }
 }
@@ -699,13 +707,14 @@ private fun LastEntryCard(
 @Composable
 private fun LastFeedCard(
     recentFeedings: List<FeedingEvent>,
+    latestFeed: FeedingEvent?,
     lastBreastfeed: FeedingEvent?,
     onClick: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Today's last feed, else the last breastfeed from the server (e.g. last night's)
-    val lastFeed = recentFeedings.firstOrNull() ?: lastBreastfeed
+    // Today's last feed, else the last feed of either kind from the server (e.g. last night's bottle)
+    val lastFeed = recentFeedings.firstOrNull() ?: latestFeed ?: lastBreastfeed
     val lastNursing = lastBreastfeed ?: recentFeedings.firstOrNull { it.type == FeedType.NURSING }
     val lastSide = lastNursing?.lastSide
 

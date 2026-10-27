@@ -8,9 +8,11 @@ import com.example.data.ml.FixedValue
 import com.example.data.ml.NeuralNet
 import com.example.data.ml.Regressor
 import com.example.data.ml.RhythmEvents
+import com.example.data.ml.RhythmPrediction
 import com.example.data.ml.RhythmTarget
 import com.example.data.ml.RidgeRegression
 import com.example.data.ml.SavedRhythmModel
+import com.example.data.ml.TimeOfDayMedian
 import com.example.data.ml.predictRhythms
 import com.example.data.ml.toText
 import com.example.data.ml.trainRhythmModels
@@ -108,11 +110,39 @@ class RhythmModelsTest {
     @Test
     fun `every model predicts the same after saving and loading`() {
         val y = DoubleArray(x.size) { 3 * x[it][0] + if (x[it][1] > 5) 40.0 else 0.0 }
-        AutoMl.candidates().forEach { c ->
+        AutoMl.candidates(listOf("Time of day (sin)", "Time of day (cos)", "Age (days)")).forEach { c ->
             val model = c.trainer.fit(x, y)
             val loaded = Regressor.fromText(model.toText())
             x.take(20).forEach { row -> assertEquals(c.family, model.predict(row), loaded.predict(row), 1e-9) }
         }
+    }
+
+    @Test
+    fun `the time-of-day median uses recent intervals from the same part of the day`() {
+        // Columns: sin and cos of the time of day, age in days; night intervals (00–06) are long, the rest short
+        val rows = (0 until 400).map { i ->
+            val minute = (i * 97) % 1440
+            val angle = 2 * Math.PI * minute / 1440
+            doubleArrayOf(kotlin.math.sin(angle), kotlin.math.cos(angle), i / 10.0) to if (minute < 360) 240.0 else 150.0
+        }
+        // Older rows say something else: only the last week counts
+        val x = rows.map { it.first }.toTypedArray()
+        val y = DoubleArray(rows.size) { if (x[it][2] < 30) 60.0 else rows[it].second }
+        val model = TimeOfDayMedian(6, 0, 7, 0, 1, 2).fit(x, y)
+        val at = { minute: Int -> 2 * Math.PI * minute / 1440 }
+        assertEquals(240.0, model.predict(doubleArrayOf(kotlin.math.sin(at(180)), kotlin.math.cos(at(180)), 40.0)), 1e-9)
+        assertEquals(150.0, model.predict(doubleArrayOf(kotlin.math.sin(at(900)), kotlin.math.cos(at(900)), 40.0)), 1e-9)
+    }
+
+    @Test
+    fun `an overdue prediction moves to the middle of the outcomes that ran longer`() {
+        val minute = 60_000L
+        val p = RhythmPrediction(anchorMillis = 0L, dueMillis = 180 * minute, residuals = listOf(-30.0, -10.0, 0.0, 10.0, 20.0, 40.0, 60.0))
+        assertEquals(180 * minute, p.expectedMillis(100 * minute)) // not due yet: unchanged
+        // At 205 min, outcomes still possible are +10 (no: 190 < 205), +20 → 200 (no), +40 → 220, +60 → 240
+        assertEquals(230 * minute, p.expectedMillis(205 * minute))
+        assertEquals(300 * minute, p.expectedMillis(300 * minute)) // later than ever before: now
+        assertEquals(180 * minute, RhythmPrediction(0L, 180 * minute).expectedMillis(300 * minute)) // no errors saved
     }
 
     @Test
@@ -132,8 +162,13 @@ class RhythmModelsTest {
         val model = trainRhythmModels(events, mapOf(RhythmTarget.FEED_GAP to 180)).first { it.target == RhythmTarget.FEED_GAP }
         val result = requireNotNull(model.result)
         assertEquals("fixed 3h 00m from Settings", result.default?.settings)
-        val saved = SavedRhythmModel(RhythmTarget.FEED_GAP, result.best.family, result.best.settings, result.best.mae, result.model, model.ageOriginMillis ?: 0L, 1L, model.inputs)
+        val saved = SavedRhythmModel(
+            RhythmTarget.FEED_GAP, result.best.family, result.best.settings, result.best.mae, result.model, model.ageOriginMillis ?: 0L, 1L, model.inputs,
+            result.best.residuals
+        )
         val reloaded = requireNotNull(SavedRhythmModel.fromText(saved.toText()))
+        assertEquals(saved.residuals, reloaded.residuals)
+        assertTrue(reloaded.residuals.size in 1..49)
         // Only the last two days, as the app keeps for predicting
         val since = events.feeds.last().timeMillis - 2 * 24 * 3_600_000L
         val recent = RhythmEvents(events.feeds.filter { it.timeMillis >= since }, events.changes.filter { it.timeMillis >= since }, events.sleeps.filter { it.timeMillis >= since })

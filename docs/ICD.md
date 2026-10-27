@@ -60,7 +60,7 @@ Writes go only through the generic create/update/delete path so the queued-write
 
 The server has no fields for some app features, so they are encoded in stock fields — part of this ICD because other clients must parse them identically:
 
-- **Note text:** `Caregiver: <name>` and, on breastfeeds, `Left: mm | Right: mm | Sides: …`; diaper extras as `Rash | Cream: … | Consistency: …`.
+- **Note text:** `Caregiver: <name>` and, on breastfeeds, `Left: mm | Right: mm | Sides: …`; diaper extras as `Amount: … | Rash | Cream: … | Consistency: …`.
 - **Tags:** a note tagged `bath` is a bath; a note tagged `milk-stash` ("Milk stash: N ml") is the milk stash.
 - **Shared timers:** a Baby Buddy timer whose name carries marker `#bb1` plus serialized live state. The full protocol is defined in §6.
 

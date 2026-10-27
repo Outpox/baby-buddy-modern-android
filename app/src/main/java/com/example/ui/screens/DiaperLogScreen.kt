@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.model.BabyProfile
+import com.example.data.model.DIAPER_AMOUNTS
 import com.example.data.model.DiaperEvent
 import com.example.data.model.DiaperType
 import com.example.data.model.TimeFormat
@@ -69,57 +70,27 @@ import com.example.ui.theme.SurfaceContainerLow
 import com.example.ui.theme.SurfaceContainerLowest
 import kotlinx.coroutines.delay
 
+/** What the diaper form saves; [timeMillis] null = now. */
+typealias DiaperSave = (
+    type: DiaperType,
+    amount: String,
+    consistency: String,
+    color: String,
+    rashPresent: Boolean,
+    skinBarriers: List<String>,
+    timeMillis: Long?,
+    notes: String,
+    startNursing: Boolean
+) -> Unit
+
 @Composable
 fun DiaperLogScreen(
     babyProfile: BabyProfile,
     recentDiapers: List<DiaperEvent>,
     onBack: () -> Unit,
-    onSaveDiaper: (
-        type: DiaperType,
-        amount: String,
-        consistency: String,
-        color: String,
-        rashPresent: Boolean,
-        skinBarriers: List<String>,
-        timeMillis: Long?, // null = now
-        notes: String,
-        startNursing: Boolean
-    ) -> Unit,
+    onSaveDiaper: DiaperSave,
     modifier: Modifier = Modifier
 ) {
-    var selectedType by remember { mutableStateOf(DiaperType.WET) }
-    var selectedAmount by remember { mutableStateOf("Medium") }
-    var selectedConsistency by remember { mutableStateOf("") } // optional; "" = not recorded
-    var selectedColor by remember { mutableStateOf("Mustard") }
-    var rashPresent by remember { mutableStateOf(false) }
-    var selectedSkinBarriers by remember { mutableStateOf(setOf<String>()) }
-    var pickedTime by remember { mutableStateOf<Long?>(null) } // null = now
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(15_000L)
-            now = System.currentTimeMillis()
-        }
-    }
-    var notesText by remember { mutableStateOf("") }
-    var showMore by remember { mutableStateOf(false) }
-
-    val isDirty = selectedType == DiaperType.DIRTY || selectedType == DiaperType.BOTH
-
-    val save: (Boolean) -> Unit = { startNursing ->
-        onSaveDiaper(
-            selectedType,
-            selectedAmount,
-            selectedConsistency,
-            selectedColor,
-            rashPresent,
-            selectedSkinBarriers.toList(),
-            pickedTime,
-            notesText,
-            startNursing
-        )
-    }
-
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -152,71 +123,154 @@ fun DiaperLogScreen(
             }
         }
 
-        // Type selector
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DiaperTypeButton(
-                    label = "Wet",
-                    icon = Icons.Default.WaterDrop,
-                    isSelected = selectedType == DiaperType.WET,
-                    tint = ItemColors.tint(TrackedItem.DIAPERS),
-                    bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
-                    modifier = Modifier.weight(1f),
-                    onClick = { selectedType = DiaperType.WET }
-                )
-                DiaperTypeButton(
-                    label = "Dirty",
-                    icon = Icons.Default.Eco,
-                    isSelected = selectedType == DiaperType.DIRTY,
-                    tint = ItemColors.tint(TrackedItem.DIAPERS),
-                    bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
-                    modifier = Modifier.weight(1f),
-                    onClick = { selectedType = DiaperType.DIRTY }
-                )
-                DiaperTypeButton(
-                    label = "Both",
-                    icon = Icons.Default.CleaningServices,
-                    isSelected = selectedType == DiaperType.BOTH,
-                    tint = ItemColors.tint(TrackedItem.DIAPERS),
-                    bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
-                    modifier = Modifier.weight(1f),
-                    onClick = { selectedType = DiaperType.BOTH }
-                )
-                DiaperTypeButton(
-                    label = "Dry",
-                    icon = Icons.Default.CheckCircle,
-                    isSelected = selectedType == DiaperType.DRY,
-                    tint = ItemColors.tint(TrackedItem.DIAPERS),
-                    bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
-                    modifier = Modifier.weight(1f),
-                    onClick = { selectedType = DiaperType.DRY }
-                )
-            }
-        }
+        item { DiaperForm(onSave = onSaveDiaper) }
 
-        // Time of the change: now unless changed
         item {
-            TimeField(
-                label = "Time",
-                millis = pickedTime ?: now,
-                onChange = { pickedTime = it },
-                valueText = if (pickedTime == null) "Now · ${TimeFormat.clock(now)}" else null
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+/**
+ * The full diaper entry, shared by the Diaper quick action and the Log screen: type, time, amount, stool
+ * consistency and color, rash, cream and notes, saved alone or followed by a feed.
+ */
+@Composable
+fun DiaperForm(onSave: DiaperSave, modifier: Modifier = Modifier) {
+    var selectedType by remember { mutableStateOf(DiaperType.WET) }
+    var selectedAmount by remember { mutableStateOf("Medium") }
+    var selectedConsistency by remember { mutableStateOf("") } // optional; "" = not recorded
+    var selectedColor by remember { mutableStateOf("Mustard") }
+    var rashPresent by remember { mutableStateOf(false) }
+    var selectedSkinBarriers by remember { mutableStateOf(setOf<String>()) }
+    var pickedTime by remember { mutableStateOf<Long?>(null) } // null = now
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(15_000L)
+            now = System.currentTimeMillis()
+        }
+    }
+    var notesText by remember { mutableStateOf("") }
+    var showMore by remember { mutableStateOf(false) }
+
+    val isDirty = selectedType == DiaperType.DIRTY || selectedType == DiaperType.BOTH
+
+    val save: (Boolean) -> Unit = { startNursing ->
+        onSave(
+            selectedType,
+            selectedAmount,
+            selectedConsistency,
+            selectedColor,
+            rashPresent,
+            selectedSkinBarriers.toList(),
+            pickedTime,
+            notesText,
+            startNursing
+        )
+    }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        // Type selector
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DiaperTypeButton(
+                label = "Wet",
+                icon = Icons.Default.WaterDrop,
+                isSelected = selectedType == DiaperType.WET,
+                tint = ItemColors.tint(TrackedItem.DIAPERS),
+                bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
+                modifier = Modifier.weight(1f),
+                onClick = { selectedType = DiaperType.WET }
+            )
+            DiaperTypeButton(
+                label = "Dirty",
+                icon = Icons.Default.Eco,
+                isSelected = selectedType == DiaperType.DIRTY,
+                tint = ItemColors.tint(TrackedItem.DIAPERS),
+                bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
+                modifier = Modifier.weight(1f),
+                onClick = { selectedType = DiaperType.DIRTY }
+            )
+            DiaperTypeButton(
+                label = "Both",
+                icon = Icons.Default.CleaningServices,
+                isSelected = selectedType == DiaperType.BOTH,
+                tint = ItemColors.tint(TrackedItem.DIAPERS),
+                bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
+                modifier = Modifier.weight(1f),
+                onClick = { selectedType = DiaperType.BOTH }
+            )
+            DiaperTypeButton(
+                label = "Dry",
+                icon = Icons.Default.CheckCircle,
+                isSelected = selectedType == DiaperType.DRY,
+                tint = ItemColors.tint(TrackedItem.DIAPERS),
+                bgSelected = ItemColors.tint(TrackedItem.DIAPERS),
+                modifier = Modifier.weight(1f),
+                onClick = { selectedType = DiaperType.DRY }
             )
         }
 
+        // Time of the change: now unless changed
+        TimeField(
+            label = "Time",
+            millis = pickedTime ?: now,
+            onChange = { pickedTime = it },
+            valueText = if (pickedTime == null) "Now · ${TimeFormat.clock(now)}" else null
+        )
+
         // Amount
         if (selectedType != DiaperType.DRY) {
-            item {
-                DiaperSection(title = "Amount") {
+            DiaperSection(title = "Amount") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DIAPER_AMOUNTS.forEach { amt ->
+                        DiaperOptionChip(
+                            label = amt,
+                            isSelected = selectedAmount == amt,
+                            onClick = { selectedAmount = amt },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Stool details (dirty / both only)
+        AnimatedVisibility(visible = isDirty) {
+            Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                DiaperSection(title = "Consistency (optional)") {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Light", "Medium", "Heavy").forEach { amt ->
+                        listOf(
+                            "Loose / Liquid" to "Loose",
+                            "Seedy / Mustard" to "Seedy",
+                            "Paste / Normal" to "Paste",
+                            "Hard / Dry" to "Hard"
+                        ).forEach { (value, label) ->
                             DiaperOptionChip(
-                                label = amt,
-                                isSelected = selectedAmount == amt,
-                                onClick = { selectedAmount = amt },
+                                label = label,
+                                isSelected = selectedConsistency == value,
+                                onClick = { selectedConsistency = if (selectedConsistency == value) "" else value },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+                DiaperSection(title = "Color") {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            "Mustard" to PrimaryContainer,
+                            "Tan/Brown" to OutlineColor,
+                            "Greenish" to SecondaryColor,
+                            "Dark" to MaterialTheme.colorScheme.inverseSurface
+                        ).forEach { (label, dot) ->
+                            ColorSwatch(
+                                label = label,
+                                colorDot = dot,
+                                isSelected = selectedColor == label,
+                                onClick = { selectedColor = label },
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -225,144 +279,93 @@ fun DiaperLogScreen(
             }
         }
 
-        // Stool details (dirty / both only)
-        item {
-            AnimatedVisibility(visible = isDirty) {
-                Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                    DiaperSection(title = "Consistency (optional)") {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(
-                                "Loose / Liquid" to "Loose",
-                                "Seedy / Mustard" to "Seedy",
-                                "Paste / Normal" to "Paste",
-                                "Hard / Dry" to "Hard"
-                            ).forEach { (value, label) ->
-                                DiaperOptionChip(
-                                    label = label,
-                                    isSelected = selectedConsistency == value,
-                                    onClick = { selectedConsistency = if (selectedConsistency == value) "" else value },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                    DiaperSection(title = "Color") {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(
-                                "Mustard" to PrimaryContainer,
-                                "Tan/Brown" to OutlineColor,
-                                "Greenish" to SecondaryColor,
-                                "Dark" to MaterialTheme.colorScheme.inverseSurface
-                            ).forEach { (label, dot) ->
-                                ColorSwatch(
-                                    label = label,
-                                    colorDot = dot,
-                                    isSelected = selectedColor == label,
-                                    onClick = { selectedColor = label },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // More details (rash, creams, notes)
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { showMore = !showMore }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("More details", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Icon(
-                        imageVector = if (showMore) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = if (showMore) "Hide details" else "Show details",
-                        tint = OutlineColor
-                    )
-                }
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { showMore = !showMore }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("More details", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Icon(
+                    imageVector = if (showMore) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (showMore) "Hide details" else "Show details",
+                    tint = OutlineColor
+                )
+            }
 
-                AnimatedVisibility(visible = showMore) {
-                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Rash", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                            Switch(
-                                checked = rashPresent,
-                                onCheckedChange = { rashPresent = it },
-                                colors = SwitchDefaults.colors(checkedThumbColor = OnPrimary, checkedTrackColor = PrimaryColor)
-                            )
-                        }
-
-                        DiaperSection(title = "Cream") {
-                            val barriers = listOf("Aquaphor / Barrier" to "Barrier", "Zinc Oxide Cream" to "Zinc", "Baby Powder" to "Powder")
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                barriers.forEach { (value, label) ->
-                                    val isSel = value in selectedSkinBarriers
-                                    DiaperOptionChip(
-                                        label = label,
-                                        isSelected = isSel,
-                                        onClick = {
-                                            selectedSkinBarriers = if (isSel) selectedSkinBarriers - value else selectedSkinBarriers + value
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = notesText,
-                            onValueChange = { notesText = it },
-                            placeholder = { Text("Notes", style = MaterialTheme.typography.bodyMedium) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedContainerColor = SurfaceContainerLow,
-                                focusedContainerColor = SurfaceContainerLowest,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedBorderColor = PrimaryColor
-                            )
+            AnimatedVisibility(visible = showMore) {
+                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Rash", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        Switch(
+                            checked = rashPresent,
+                            onCheckedChange = { rashPresent = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = OnPrimary, checkedTrackColor = PrimaryColor)
                         )
                     }
+
+                    DiaperSection(title = "Cream") {
+                        val barriers = listOf("Aquaphor / Barrier" to "Barrier", "Zinc Oxide Cream" to "Zinc", "Baby Powder" to "Powder")
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            barriers.forEach { (value, label) ->
+                                val isSel = value in selectedSkinBarriers
+                                DiaperOptionChip(
+                                    label = label,
+                                    isSelected = isSel,
+                                    onClick = {
+                                        selectedSkinBarriers = if (isSel) selectedSkinBarriers - value else selectedSkinBarriers + value
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = notesText,
+                        onValueChange = { notesText = it },
+                        placeholder = { Text("Notes", style = MaterialTheme.typography.bodyMedium) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            unfocusedContainerColor = SurfaceContainerLow,
+                            focusedContainerColor = SurfaceContainerLowest,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedBorderColor = PrimaryColor
+                        )
+                    )
                 }
             }
         }
 
         // Actions
-        item {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Button(
+                onClick = { save(false) },
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryColor),
+                shape = RoundedCornerShape(32.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .testTag("save_diaper_btn")
             ) {
-                Button(
-                    onClick = { save(false) },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryColor),
-                    shape = RoundedCornerShape(32.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .testTag("save_diaper_btn")
-                ) {
-                    Text("Save", style = MaterialTheme.typography.labelLarge)
-                }
-                TextButton(onClick = { save(true) }) {
-                    Text("Save & start feed", color = SecondaryColor, fontWeight = FontWeight.SemiBold)
-                }
+                Text("Save", style = MaterialTheme.typography.labelLarge)
             }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(24.dp))
+            TextButton(onClick = { save(true) }) {
+                Text("Save & start feed", color = SecondaryColor, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }

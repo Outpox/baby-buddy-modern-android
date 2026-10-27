@@ -158,9 +158,10 @@ fun RhythmModelsTab(
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(
             "Each rhythm gets its own model, chosen automatically: linear regression, boosted trees, a small " +
-                "neural net and nearest neighbours are each tried with several settings and scored, next to the " +
-                "app's default estimate, on how well they predicted your latest entries. Save one to have it " +
-                "estimate reminders, Today and the widget. Everything runs on this phone.",
+                "neural net, nearest neighbours and the recent median by time of day are each tried with several " +
+                "settings and scored, next to the app's default estimate, on how well they predicted your latest " +
+                "entries. Save one to have it estimate reminders, Today and the widget; once a time passes, Today " +
+                "re-estimates it from how late the model has been before. Everything runs on this phone.",
             style = MaterialTheme.typography.bodySmall,
             color = OnSurfaceVariant
         )
