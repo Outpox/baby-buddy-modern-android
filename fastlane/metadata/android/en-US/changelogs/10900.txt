@@ -1,0 +1,3 @@
+- New Wake windows card on Today: how long the baby has been awake, progress towards the next nap, and today's windows with their average and longest
+- New Wake window tile in Today's summary
+- Customize Today: choose which summary tiles show, and which parts the Wake windows card shows

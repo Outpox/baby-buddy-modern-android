@@ -1,5 +1,8 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -24,7 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,15 +47,23 @@ import com.example.data.model.GrowthEvent
 import com.example.data.model.GrowthKind
 import com.example.data.model.NoteEvent
 import com.example.data.model.TemperatureEvent
+import com.example.data.model.TimeFormat
+import com.example.data.model.TrackedItem
+import com.example.data.model.WakeWindow
+import com.example.data.model.WakeWindowPart
+import com.example.data.model.averageMinutes
 import com.example.data.model.formatGrowth
+import com.example.data.model.formatMinutes
 import com.example.data.model.growthPercentile
 import com.example.data.model.ordinalPercentile
+import com.example.ui.theme.ItemColors
 import com.example.ui.theme.OnPrimary
 import com.example.ui.theme.OutlineColor
 import com.example.ui.theme.PrimaryColor
 import com.example.ui.theme.PrimaryContainer
 import com.example.ui.theme.SurfaceContainerLow
 import com.example.ui.theme.SurfaceContainerLowest
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 /** Shared calm card shell: rounded white card, title row with a small remove button. */
@@ -393,6 +407,125 @@ fun NotesWidgetCard(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Text("Add", style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+/**
+ * How long the baby has been awake (with progress towards [nextSleepAt]: the rhythm model's next sleep, else the
+ * awake reminder) and today's finished wake windows, each part only if it's in [parts] (Customize Today).
+ * While [sleepingSince] is set it shows the sleep and the window before it instead.
+ */
+@Composable
+fun WakeWindowsWidgetCard(
+    awakeSince: Long?,
+    sleepingSince: Long?,
+    nextSleepAt: Long?,
+    windows: List<WakeWindow>,
+    parts: Set<WakeWindowPart>,
+    onOpenSleep: () -> Unit,
+    onRemoveWidget: () -> Unit
+) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L - now % 60_000L)
+            now = System.currentTimeMillis()
+        }
+    }
+    val tint = ItemColors.tint(TrackedItem.SLEEP)
+    val awake = awakeSince != null && awakeSince <= now && sleepingSince == null
+    val showNapDue = awake && WakeWindowPart.NAP_DUE in parts && nextSleepAt != null && nextSleepAt > awakeSince!!
+
+    WidgetCardShell(title = "Wake windows", onRemoveWidget = onRemoveWidget) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onOpenSleep)
+        ) {
+            when {
+                sleepingSince != null -> if (WakeWindowPart.AWAKE_FOR in parts) {
+                    Text("Asleep for", style = MaterialTheme.typography.labelLarge, color = OutlineColor)
+                    Text(
+                        formatMinutes(((now - sleepingSince) / 60_000L).toInt().coerceAtLeast(0)),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        windows.lastOrNull()?.let { "since ${TimeFormat.clock(sleepingSince)} · awake ${formatMinutes(it.minutes)} before" }
+                            ?: "since ${TimeFormat.clock(sleepingSince)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OutlineColor
+                    )
+                }
+
+                awake -> if (WakeWindowPart.AWAKE_FOR in parts) {
+                    Text("Awake for", style = MaterialTheme.typography.labelLarge, color = OutlineColor)
+                    Text(
+                        formatMinutes(((now - awakeSince!!) / 60_000L).toInt()),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text("since ${TimeFormat.clock(awakeSince)}", style = MaterialTheme.typography.bodySmall, color = OutlineColor)
+                }
+
+                else -> Text("No sleep logged yet", style = MaterialTheme.typography.bodyMedium, color = OutlineColor)
+            }
+            if (showNapDue) {
+                val since = awakeSince!!
+                val due = nextSleepAt!!
+                val minutesLeft = ((due - now) / 60_000L).toInt()
+                if (WakeWindowPart.AWAKE_FOR in parts) Spacer(modifier = Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = { ((now - since).toFloat() / (due - since)).coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = if (minutesLeft < 0) PrimaryColor else tint,
+                    trackColor = SurfaceContainerLow
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Nap due ~${TimeFormat.clock(due)} · " +
+                        if (minutesLeft >= 0) "in ${formatMinutes(minutesLeft)}" else "${formatMinutes(-minutesLeft)} over",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (minutesLeft < 0) PrimaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (windows.isNotEmpty() && WakeWindowPart.TODAY_STATS in parts) {
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                "Today: ${windows.size} · average ${formatMinutes(windows.averageMinutes())} · longest ${formatMinutes(windows.maxOf { it.minutes })}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (windows.isNotEmpty() && WakeWindowPart.WINDOW_BARS in parts) {
+            Spacer(modifier = Modifier.height(8.dp))
+            // One bar per window, oldest first, scaled to the longest
+            val longest = windows.maxOf { it.minutes }.coerceAtLeast(1)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                windows.forEach { w ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Spacer(
+                            modifier = Modifier
+                                .size(width = 36.dp, height = (8 + 28 * w.minutes / longest).dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(ItemColors.soft(TrackedItem.SLEEP))
+                        )
+                        Text(formatMinutes(w.minutes), style = MaterialTheme.typography.labelSmall, color = tint)
+                        Text(TimeFormat.clock(w.startMillis), style = MaterialTheme.typography.labelSmall, color = OutlineColor)
+                    }
+                }
             }
         }
     }

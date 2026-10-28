@@ -56,9 +56,11 @@ import com.example.data.model.StartSide
 import com.example.data.model.TemperatureEvent
 import com.example.data.model.ThemeMode
 import com.example.data.model.TimeFormat
+import com.example.data.model.TodayTile
 import com.example.data.model.TrackedItem
 import com.example.data.model.TummyTimeEvent
 import com.example.data.model.TummyTimeGoal
+import com.example.data.model.WakeWindowPart
 import com.example.data.model.isNapTime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -330,6 +332,25 @@ class BabyBuddyRepository {
         val hidden = if (tracked) _hiddenItems.value - item else _hiddenItems.value + item
         _hiddenItems.value = hidden
         prefs?.edit()?.putString(PREF_HIDDEN_ITEMS, hidden.joinToString(",") { it.name })?.apply()
+    }
+
+    // Customize Today: summary tiles and Wake windows card parts turned off (saved as what's off, so new ones show)
+    private val _hiddenTodayTiles = MutableStateFlow<Set<TodayTile>>(emptySet())
+    val hiddenTodayTiles: StateFlow<Set<TodayTile>> = _hiddenTodayTiles.asStateFlow()
+
+    fun setTodayTileShown(tile: TodayTile, shown: Boolean) {
+        val hidden = if (shown) _hiddenTodayTiles.value - tile else _hiddenTodayTiles.value + tile
+        _hiddenTodayTiles.value = hidden
+        prefs?.edit()?.putString(PREF_HIDDEN_SUMMARY_TILES, hidden.joinToString(",") { it.name })?.apply()
+    }
+
+    private val _hiddenWakeWindowParts = MutableStateFlow<Set<WakeWindowPart>>(emptySet())
+    val hiddenWakeWindowParts: StateFlow<Set<WakeWindowPart>> = _hiddenWakeWindowParts.asStateFlow()
+
+    fun setWakeWindowPartShown(part: WakeWindowPart, shown: Boolean) {
+        val hidden = if (shown) _hiddenWakeWindowParts.value - part else _hiddenWakeWindowParts.value + part
+        _hiddenWakeWindowParts.value = hidden
+        prefs?.edit()?.putString(PREF_HIDDEN_WAKE_PARTS, hidden.joinToString(",") { it.name })?.apply()
     }
 
     private val _startSide = MutableStateFlow(StartSide.OPPOSITE)
@@ -2755,6 +2776,10 @@ class BabyBuddyRepository {
         _babySex.value = p.getString(PREF_BABY_SEX, null)?.let { name -> BabySex.entries.firstOrNull { it.name == name } }
         _hiddenItems.value = p.getString(PREF_HIDDEN_ITEMS, null).orEmpty().split(",")
             .mapNotNull { name -> TrackedItem.entries.firstOrNull { it.name == name } }.toSet()
+        _hiddenTodayTiles.value = p.getString(PREF_HIDDEN_SUMMARY_TILES, null).orEmpty().split(",")
+            .mapNotNull { name -> TodayTile.entries.firstOrNull { it.name == name } }.toSet()
+        _hiddenWakeWindowParts.value = p.getString(PREF_HIDDEN_WAKE_PARTS, null).orEmpty().split(",")
+            .mapNotNull { name -> WakeWindowPart.entries.firstOrNull { it.name == name } }.toSet()
         p.getString(PREF_DASHBOARD_WIDGETS, null)?.let { saved ->
             val enabled = saved.split(",").map { if (it == "WEIGHT") "GROWTH" else it }.toSet()
             // Cards added since the choice was saved keep their default (saves from before this list knew only these four)
@@ -2978,6 +3003,7 @@ class BabyBuddyRepository {
         fun defaultDashboardWidgets() = listOf(
             DashboardWidgetConfig(DashboardWidgetType.LAST_FEED, "Last feed", "Time since, side", isEnabled = true),
             DashboardWidgetConfig(DashboardWidgetType.LAST_DIAPER, "Last diaper", "Time since, type", isEnabled = true),
+            DashboardWidgetConfig(DashboardWidgetType.WAKE_WINDOWS, "Wake windows", "Awake for, today's windows", isEnabled = true),
             DashboardWidgetConfig(DashboardWidgetType.TUMMY_TIME_GOAL, "Tummy time", "Daily goal", isEnabled = false),
             DashboardWidgetConfig(DashboardWidgetType.HEALTH_VITALS, "Temperature", "Readings", isEnabled = false),
             DashboardWidgetConfig(DashboardWidgetType.CAREGIVER_NOTES, "Notes", "Shared notes", isEnabled = false),
@@ -3009,6 +3035,8 @@ class BabyBuddyRepository {
         private const val PREF_SLEEP_ENDED_AT = "sleep_ended_at"
         private const val PREF_REMIND_FEED = "remind_feed_minutes"
         private const val PREF_HIDDEN_ITEMS = "hidden_items"
+        private const val PREF_HIDDEN_SUMMARY_TILES = "hidden_summary_tiles"
+        private const val PREF_HIDDEN_WAKE_PARTS = "hidden_wake_window_parts"
         private const val PREF_REMIND_SLEEP = "remind_sleep_minutes"
         private const val PREF_WHEEL_INPUT = "time_input_wheel_v2" // v2: typing became the default
         private const val PREF_REMIND_AWAKE = "remind_awake_minutes"

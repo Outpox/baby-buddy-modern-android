@@ -37,9 +37,11 @@ import com.example.data.model.StartSide
 import com.example.data.model.TemperatureEvent
 import com.example.data.model.ThemeMode
 import com.example.data.model.TimeFormat
+import com.example.data.model.TodayTile
 import com.example.data.model.TrackedItem
 import com.example.data.model.TummyTimeEvent
 import com.example.data.model.TummyTimeGoal
+import com.example.data.model.WakeWindowPart
 import com.example.data.model.formatGrowth
 import com.example.data.model.formatMinutes
 import com.example.data.repository.BabyBuddyRepository
@@ -756,6 +758,10 @@ class MainViewModel(
     val reminders: StateFlow<ReminderSettings> = repository.reminders
     val hiddenItems: StateFlow<Set<TrackedItem>> = repository.hiddenItems
     fun setItemTracked(item: TrackedItem, tracked: Boolean) = repository.setItemTracked(item, tracked)
+    val hiddenTodayTiles: StateFlow<Set<TodayTile>> = repository.hiddenTodayTiles
+    fun setTodayTileShown(tile: TodayTile, shown: Boolean) = repository.setTodayTileShown(tile, shown)
+    val hiddenWakeWindowParts: StateFlow<Set<WakeWindowPart>> = repository.hiddenWakeWindowParts
+    fun setWakeWindowPartShown(part: WakeWindowPart, shown: Boolean) = repository.setWakeWindowPartShown(part, shown)
     fun setReminders(settings: ReminderSettings) = repository.setReminders(settings)
 
     fun setMilkStash(ml: Int) {

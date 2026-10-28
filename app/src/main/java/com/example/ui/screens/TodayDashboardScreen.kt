@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Kitchen
 import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -89,9 +90,14 @@ import com.example.data.model.SleepEvent
 import com.example.data.model.SleepTimerState
 import com.example.data.model.TemperatureEvent
 import com.example.data.model.TimeFormat
+import com.example.data.model.TodayTile
 import com.example.data.model.TrackedItem
 import com.example.data.model.TummyTimeEvent
 import com.example.data.model.TummyTimeGoal
+import com.example.data.model.WakeWindow
+import com.example.data.model.WakeWindowPart
+import com.example.data.model.averageMinutes
+import com.example.data.model.completedWakeWindows
 import com.example.data.model.dayAndTime
 import com.example.data.model.formatMinutes
 import com.example.ui.HistoryFilter
@@ -109,6 +115,7 @@ import com.example.ui.components.QuickActionsEditorDialog
 import com.example.ui.components.TemperatureWidgetCard
 import com.example.ui.components.TummyTimeDialog
 import com.example.ui.components.TummyTimeGoalWidgetCard
+import com.example.ui.components.WakeWindowsWidgetCard
 import com.example.ui.theme.ItemColors
 import com.example.ui.theme.OnPrimary
 import com.example.ui.theme.OutlineColor
@@ -156,6 +163,8 @@ fun TodayDashboardScreen(
     reminders: ReminderSettings = ReminderSettings(),
     modelNext: Map<RhythmTarget, Long> = emptyMap(), // picked rhythm models' next times (Trends → Models)
     hiddenItems: Set<TrackedItem> = emptySet(),
+    hiddenTiles: Set<TodayTile> = emptySet(), // summary tiles turned off in Customize Today
+    hiddenWakeParts: Set<WakeWindowPart> = emptySet(), // Wake windows card parts turned off there
     lastBathMillis: Long? = null,
     onLogBath: (notes: String, timeMillis: Long?) -> Unit = { _, _ -> },
     onOpenHistory: (HistoryFilter) -> Unit = {},
@@ -197,6 +206,17 @@ fun TodayDashboardScreen(
         }
     }
     var showNoteDialog by remember { mutableStateOf(false) }
+
+    // Today's finished wake windows, for the Wake windows card and summary tile
+    val todayStart = remember(recentSleeps) {
+        java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val wakeWindows = remember(recentSleeps, todayStart) { completedWakeWindows(recentSleeps, todayStart) }
 
     if (showStashDialog) {
         MilkStashDialog(
@@ -392,21 +412,39 @@ fun TodayDashboardScreen(
             val awakeSince = lastSleepEndMillis.takeIf {
                 !sleepTimer.isRunning && TrackedItem.SLEEP !in hiddenItems && it != null && it <= System.currentTimeMillis()
             }
+            val showWakeWindows = TrackedItem.SLEEP !in hiddenItems && cardOn(DashboardWidgetType.WAKE_WINDOWS)
+            if (showWakeWindows) {
+                item(key = "wake_windows") {
+                    WakeWindowsWidgetCard(
+                        awakeSince = awakeSince,
+                        sleepingSince = sleepTimer.startMillis.takeIf { sleepTimer.isRunning },
+                        nextSleepAt = modelNext[RhythmTarget.AWAKE_WINDOW]
+                            ?: awakeSince?.let { since -> reminders.awakeAfterMinutes.takeIf { it > 0 }?.let { since + it * 60_000L } },
+                        windows = wakeWindows,
+                        parts = WakeWindowPart.entries.toSet() - hiddenWakeParts,
+                        onOpenSleep = { onNavigate(ScreenDestination.SLEEP) },
+                        onRemoveWidget = { onRemoveDashboardWidget(DashboardWidgetType.WAKE_WINDOWS) }
+                    )
+                }
+            }
             val nextFeedAt = modelNext[RhythmTarget.FEED_GAP]
                 ?: if (!feedingShown || liveTimerState.isRunning || lastFeedMillis == null || feedEvery == null) {
                     null
                 } else {
                     lastFeedMillis + feedEvery * 60_000L
                 }
+            // Left out when the Wake windows card already shows them
+            val wakeCardShows = { part: WakeWindowPart -> showWakeWindows && part !in hiddenWakeParts }
             val otherNext = listOfNotNull(
                 modelNext[RhythmTarget.DIAPER_GAP]?.let { "Next diaper" to it },
-                modelNext[RhythmTarget.AWAKE_WINDOW]?.let { "Next sleep" to it },
+                modelNext[RhythmTarget.AWAKE_WINDOW]?.takeUnless { wakeCardShows(WakeWindowPart.NAP_DUE) }?.let { "Next sleep" to it },
                 modelNext[RhythmTarget.SLEEP_LENGTH]?.let { "Wake-up" to it }
             )
-            if (awakeSince != null || nextFeedAt != null || otherNext.isNotEmpty()) {
+            val nextUpAwakeSince = awakeSince.takeUnless { wakeCardShows(WakeWindowPart.AWAKE_FOR) }
+            if (nextUpAwakeSince != null || nextFeedAt != null || otherNext.isNotEmpty()) {
                 item(key = "next_up") {
                     NextUpCard(
-                        awakeSince = awakeSince,
+                        awakeSince = nextUpAwakeSince,
                         nextFeedAt = nextFeedAt,
                         onSleepClick = { onNavigate(ScreenDestination.SLEEP) },
                         modelNext = otherNext
@@ -422,6 +460,10 @@ fun TodayDashboardScreen(
                     recentPumpings = recentPumpings,
                     recentSleeps = recentSleeps,
                     hidden = hiddenItems,
+                    hiddenTiles = hiddenTiles,
+                    awakeSince = awakeSince,
+                    wakeWindows = wakeWindows,
+                    onWakeWindowClick = { onNavigate(ScreenDestination.SLEEP) },
                     sleepTimer = sleepTimer,
                     milkStash = milkStash,
                     onMilkStashClick = { showStashDialog = true },
@@ -451,13 +493,13 @@ fun TodayDashboardScreen(
             }
 
             dashboardWidgets.filter {
-                it.isEnabled && it.type !in LAST_ENTRY_CARDS && !(it.type == DashboardWidgetType.TUMMY_TIME_GOAL && TrackedItem.TUMMY_TIME in hiddenItems) &&
+                it.isEnabled && it.type !in TOP_CARDS && !(it.type == DashboardWidgetType.TUMMY_TIME_GOAL && TrackedItem.TUMMY_TIME in hiddenItems) &&
                     !(it.type == DashboardWidgetType.GROWTH && TrackedItem.GROWTH in hiddenItems)
             }.forEach { widget ->
                 item(key = "widget_${widget.type.name}") {
                     when (widget.type) {
-                        // Shown in the pair near the top
-                        DashboardWidgetType.LAST_FEED, DashboardWidgetType.LAST_DIAPER -> Unit
+                        // Shown near the top
+                        DashboardWidgetType.LAST_FEED, DashboardWidgetType.LAST_DIAPER, DashboardWidgetType.WAKE_WINDOWS -> Unit
 
                         DashboardWidgetType.TUMMY_TIME_GOAL -> TummyTimeGoalWidgetCard(
                             goalMinutes = tummyTimeGoal.dailyGoalMinutes,
@@ -661,7 +703,8 @@ private fun sinceLabel(elapsedMillis: Long): String {
     }
 }
 
-private val LAST_ENTRY_CARDS = setOf(DashboardWidgetType.LAST_FEED, DashboardWidgetType.LAST_DIAPER)
+// Shown near the top of Today rather than with the other cards
+private val TOP_CARDS = setOf(DashboardWidgetType.LAST_FEED, DashboardWidgetType.LAST_DIAPER, DashboardWidgetType.WAKE_WINDOWS)
 
 /** The current time, updated on each minute boundary (for "… ago" labels). */
 @Composable
@@ -922,6 +965,10 @@ private fun TodaySummaryGrid(
     onMilkStashClick: () -> Unit,
     onOpenHistory: (HistoryFilter) -> Unit,
     hidden: Set<TrackedItem>,
+    hiddenTiles: Set<TodayTile> = emptySet(),
+    awakeSince: Long? = null,
+    wakeWindows: List<WakeWindow> = emptyList(),
+    onWakeWindowClick: () -> Unit = {},
     lastBathMillis: Long? = null,
     onBathClick: () -> Unit = {}
 ) {
@@ -948,7 +995,7 @@ private fun TodaySummaryGrid(
 
     // Only the tracked items, two per row
     val tiles = buildList<@Composable (Modifier) -> Unit> {
-        if (TrackedItem.BREASTFEEDING !in hidden || TrackedItem.BOTTLE !in hidden) {
+        if ((TrackedItem.BREASTFEEDING !in hidden || TrackedItem.BOTTLE !in hidden) && TodayTile.FEEDS !in hiddenTiles) {
             add { m ->
                 SummaryTile(
                     label = "Feeds",
@@ -967,7 +1014,7 @@ private fun TodaySummaryGrid(
                 )
             }
         }
-        if (TrackedItem.DIAPERS !in hidden) {
+        if (TrackedItem.DIAPERS !in hidden && TodayTile.DIAPERS !in hiddenTiles) {
             add { m ->
                 SummaryTile(
                     label = "Diapers",
@@ -981,7 +1028,7 @@ private fun TodaySummaryGrid(
                 )
             }
         }
-        if (TrackedItem.SLEEP !in hidden) {
+        if (TrackedItem.SLEEP !in hidden && TodayTile.SLEEP !in hiddenTiles) {
             add { m ->
                 SummaryTile(
                     label = "Sleep",
@@ -999,7 +1046,30 @@ private fun TodaySummaryGrid(
                 )
             }
         }
-        if (TrackedItem.PUMPING !in hidden) {
+        if (TrackedItem.SLEEP !in hidden && TodayTile.WAKE_WINDOW !in hiddenTiles) {
+            add { m ->
+                val minuteNow = rememberMinuteClock()
+                SummaryTile(
+                    label = "Wake window",
+                    value = when {
+                        sleepTimer.isRunning -> "Asleep"
+                        awakeSince != null -> formatMinutes(((minuteNow - awakeSince) / 60_000L).toInt().coerceAtLeast(0))
+                        else -> "–"
+                    },
+                    detail = if (wakeWindows.isEmpty()) {
+                        "None ended today"
+                    } else {
+                        "Avg ${formatMinutes(wakeWindows.averageMinutes())} · ${wakeWindows.size} today"
+                    },
+                    icon = Icons.Default.WbSunny,
+                    tint = ItemColors.tint(TrackedItem.SLEEP),
+                    background = ItemColors.soft(TrackedItem.SLEEP),
+                    onClick = onWakeWindowClick,
+                    modifier = m
+                )
+            }
+        }
+        if (TrackedItem.PUMPING !in hidden && TodayTile.PUMPED !in hiddenTiles) {
             add { m ->
                 SummaryTile(
                     label = "Pumped",
@@ -1013,7 +1083,7 @@ private fun TodaySummaryGrid(
                 )
             }
         }
-        if (TrackedItem.MILK_STASH !in hidden) {
+        if (TrackedItem.MILK_STASH !in hidden && TodayTile.MILK_STASH !in hiddenTiles) {
             add { m ->
                 SummaryTile(
                     label = "Milk stash",
@@ -1027,7 +1097,7 @@ private fun TodaySummaryGrid(
                 )
             }
         }
-        if (TrackedItem.TUMMY_TIME !in hidden) {
+        if (TrackedItem.TUMMY_TIME !in hidden && TodayTile.TUMMY_TIME !in hiddenTiles) {
             add { m ->
                 SummaryTile(
                     label = "Tummy time",
@@ -1041,7 +1111,7 @@ private fun TodaySummaryGrid(
                 )
             }
         }
-        if (TrackedItem.BATH !in hidden) {
+        if (TrackedItem.BATH !in hidden && TodayTile.BATH !in hiddenTiles) {
             add { m ->
                 SummaryTile(
                     label = "Last bath",

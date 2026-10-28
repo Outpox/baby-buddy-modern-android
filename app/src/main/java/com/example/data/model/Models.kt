@@ -273,10 +273,23 @@ enum class QuickAction(val label: String) {
 enum class DashboardWidgetType(val displayName: String, val category: String) {
     LAST_FEED("Last feed", "Feeding"),
     LAST_DIAPER("Last diaper", "Diapers"),
+    WAKE_WINDOWS("Wake windows", "Sleep"),
     TUMMY_TIME_GOAL("Tummy time", "Activity"),
     HEALTH_VITALS("Temperature", "Health"),
     CAREGIVER_NOTES("Notes", "Family"),
     GROWTH("Growth", "Health")
+}
+
+/** The tiles in Today's summary grid; which show is chosen in Customize Today (and tracked items still apply). */
+enum class TodayTile(val label: String, val item: TrackedItem?) {
+    FEEDS("Feeds", null), // shown while breast or bottle feeds are tracked
+    DIAPERS("Diapers", TrackedItem.DIAPERS),
+    SLEEP("Sleep", TrackedItem.SLEEP),
+    WAKE_WINDOW("Wake window", TrackedItem.SLEEP),
+    PUMPED("Pumped", TrackedItem.PUMPING),
+    MILK_STASH("Milk stash", TrackedItem.MILK_STASH),
+    TUMMY_TIME("Tummy time", TrackedItem.TUMMY_TIME),
+    BATH("Last bath", TrackedItem.BATH)
 }
 
 data class DashboardWidgetConfig(

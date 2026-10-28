@@ -257,6 +257,8 @@ fun BabyBuddyApp(
     val lastBathMillis by viewModel.lastBathMillis.collectAsState()
     val reminders by viewModel.reminders.collectAsState()
     val hiddenItems by viewModel.hiddenItems.collectAsState()
+    val hiddenTodayTiles by viewModel.hiddenTodayTiles.collectAsState()
+    val hiddenWakeWindowParts by viewModel.hiddenWakeWindowParts.collectAsState()
 
     // Nothing to show without a server: until logged in (or a saved login is restored), only the login screen
     val needsLogin = !connectionConfig.isConnected
@@ -350,6 +352,8 @@ fun BabyBuddyApp(
                         reminders = reminders,
                         modelNext = modelNext,
                         hiddenItems = hiddenItems,
+                        hiddenTiles = hiddenTodayTiles,
+                        hiddenWakeParts = hiddenWakeWindowParts,
                         lastBathMillis = lastBathMillis,
                         onLogBath = { notes, time -> viewModel.logBath(time, notes) },
                         onOpenHistory = { filter -> viewModel.openHistory(filter) },
@@ -626,6 +630,10 @@ fun BabyBuddyApp(
         AddWidgetModal(
             dashboardWidgets = dashboardWidgets,
             onToggleWidget = { type -> viewModel.toggleDashboardWidget(type) },
+            hiddenTiles = hiddenTodayTiles,
+            onToggleTile = { tile -> viewModel.setTodayTileShown(tile, tile in hiddenTodayTiles) },
+            hiddenWakeParts = hiddenWakeWindowParts,
+            onToggleWakePart = { part -> viewModel.setWakeWindowPartShown(part, part in hiddenWakeWindowParts) },
             onPinHomeScreenWidget = { type -> viewModel.pinHomeScreenWidget(context, type) },
             onDismiss = { viewModel.setAddWidgetModalVisible(false) }
         )

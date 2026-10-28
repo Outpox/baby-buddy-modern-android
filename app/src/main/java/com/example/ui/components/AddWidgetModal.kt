@@ -7,6 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -78,7 +82,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.DashboardWidgetConfig
 import com.example.data.model.DashboardWidgetType
+import com.example.data.model.TodayTile
 import com.example.data.model.TrackedItem
+import com.example.data.model.WakeWindowPart
 import com.example.ui.theme.ItemColors
 import com.example.ui.theme.OnPrimary
 import com.example.ui.theme.OutlineColor
@@ -102,7 +108,11 @@ fun AddWidgetModal(
     dashboardWidgets: List<DashboardWidgetConfig>,
     onToggleWidget: (DashboardWidgetType) -> Unit,
     onPinHomeScreenWidget: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    hiddenTiles: Set<TodayTile> = emptySet(),
+    onToggleTile: (TodayTile) -> Unit = {},
+    hiddenWakeParts: Set<WakeWindowPart> = emptySet(),
+    onToggleWakePart: (WakeWindowPart) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -245,7 +255,11 @@ fun AddWidgetModal(
                 if (selectedTab == 0) {
                     DashboardWidgetsTab(
                         widgets = dashboardWidgets,
-                        onToggleWidget = onToggleWidget
+                        onToggleWidget = onToggleWidget,
+                        hiddenTiles = hiddenTiles,
+                        onToggleTile = onToggleTile,
+                        hiddenWakeParts = hiddenWakeParts,
+                        onToggleWakePart = onToggleWakePart
                     )
                 } else {
                     HomeScreenWidgetsTab(
@@ -260,7 +274,11 @@ fun AddWidgetModal(
 @Composable
 private fun DashboardWidgetsTab(
     widgets: List<DashboardWidgetConfig>,
-    onToggleWidget: (DashboardWidgetType) -> Unit
+    onToggleWidget: (DashboardWidgetType) -> Unit,
+    hiddenTiles: Set<TodayTile>,
+    onToggleTile: (TodayTile) -> Unit,
+    hiddenWakeParts: Set<WakeWindowPart>,
+    onToggleWakePart: (WakeWindowPart) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -295,10 +313,46 @@ private fun DashboardWidgetsTab(
             }
         }
 
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceContainerLowest),
+                border = androidx.compose.foundation.BorderStroke(1.dp, OutlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Summary tiles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "The \"Today\" grid of totals. Items you don't track stay hidden.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ToggleChips(
+                        options = TodayTile.entries.map { it.label to it },
+                        isOn = { it !in hiddenTiles },
+                        onToggle = onToggleTile
+                    )
+                }
+            }
+        }
+
         items(widgets) { widget ->
             DashboardWidgetItemCard(
                 widget = widget,
-                onToggle = { onToggleWidget(widget.type) }
+                onToggle = { onToggleWidget(widget.type) },
+                // The Wake windows card's parts, while it's on
+                options = if (widget.type == DashboardWidgetType.WAKE_WINDOWS && widget.isEnabled) {
+                    {
+                        Text("Show", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ToggleChips(
+                            options = WakeWindowPart.entries.map { it.label to it },
+                            isOn = { it !in hiddenWakeParts },
+                            onToggle = onToggleWakePart
+                        )
+                    }
+                } else {
+                    null
+                }
             )
         }
 
@@ -311,7 +365,8 @@ private fun DashboardWidgetsTab(
 @Composable
 private fun DashboardWidgetItemCard(
     widget: DashboardWidgetConfig,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    options: (@Composable ColumnScope.() -> Unit)? = null // settings shown under the card
 ) {
     val icon = getWidgetIcon(widget.type)
     val colorAccent = getWidgetAccent(widget.type)
@@ -400,6 +455,45 @@ private fun DashboardWidgetItemCard(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Add", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
+            }
+        }
+        if (options != null) {
+            Column(
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = options
+            )
+        }
+    }
+}
+
+/** Pill chips that turn options on or off. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T> ToggleChips(options: List<Pair<String, T>>, isOn: (T) -> Boolean, onToggle: (T) -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { (label, value) ->
+            val on = isOn(value)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (on) SecondaryFixed else SurfaceContainerHigh)
+                    .clickable { onToggle(value) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (on) Icon(Icons.Default.Check, contentDescription = null, tint = SecondaryColor, modifier = Modifier.size(14.dp))
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                    color = if (on) SecondaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -746,6 +840,7 @@ private fun MiniSummaryBox(
 private fun getWidgetIcon(type: DashboardWidgetType): ImageVector = when (type) {
     DashboardWidgetType.LAST_FEED -> Icons.Default.Restaurant
     DashboardWidgetType.LAST_DIAPER -> Icons.Default.WaterDrop
+    DashboardWidgetType.WAKE_WINDOWS -> Icons.Default.WbSunny
     DashboardWidgetType.TUMMY_TIME_GOAL -> Icons.Default.FitnessCenter
     DashboardWidgetType.HEALTH_VITALS -> Icons.Default.Thermostat
     DashboardWidgetType.CAREGIVER_NOTES -> Icons.Default.NoteAlt
@@ -755,6 +850,7 @@ private fun getWidgetIcon(type: DashboardWidgetType): ImageVector = when (type) 
 private fun getWidgetAccent(type: DashboardWidgetType): Color = when (type) {
     DashboardWidgetType.LAST_FEED -> ItemColors.tint(TrackedItem.BREASTFEEDING)
     DashboardWidgetType.LAST_DIAPER -> ItemColors.tint(TrackedItem.DIAPERS)
+    DashboardWidgetType.WAKE_WINDOWS -> ItemColors.tint(TrackedItem.SLEEP)
     DashboardWidgetType.TUMMY_TIME_GOAL -> ItemColors.tint(TrackedItem.TUMMY_TIME)
     DashboardWidgetType.HEALTH_VITALS -> PrimaryColor
     DashboardWidgetType.CAREGIVER_NOTES -> ItemColors.tint(TrackedItem.QUICK_NOTES)
@@ -764,6 +860,7 @@ private fun getWidgetAccent(type: DashboardWidgetType): Color = when (type) {
 private fun getWidgetDescription(type: DashboardWidgetType): String = when (type) {
     DashboardWidgetType.LAST_FEED -> "When the last feed started, how long ago, and the last side."
     DashboardWidgetType.LAST_DIAPER -> "When the last diaper change was, how long ago, and its type."
+    DashboardWidgetType.WAKE_WINDOWS -> "How long the baby has been awake, when the next nap is due, and today's wake windows."
     DashboardWidgetType.TUMMY_TIME_GOAL -> "Log tummy time towards a daily goal."
     DashboardWidgetType.HEALTH_VITALS -> "Log and see temperature readings."
     DashboardWidgetType.CAREGIVER_NOTES -> "Shared notes like baths and routines."
